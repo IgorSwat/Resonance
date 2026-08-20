@@ -47,6 +47,56 @@ def zero_run_ms(y, sr):  # longest digital dropout
     return (d.max() if len(d) else 0) / sr * 1000
 ```
 
+### 1.0 Noise-floor spectral flatness — calibration
+
+`tools/metrics/spectral_flatness.py` scores the geometric/arithmetic mean ratio of the power
+spectrum over the quietest 10% of frames (median across those frames).
+
+**The ceiling is 0.56, not 1.0.** A single-frame periodogram of white noise has exponentially
+distributed bins, whose geometric/arithmetic mean ratio is exp(-gamma) = 0.5615 — measured 0.5626 on
+synthetic white noise. Any threshold must be read against 0.56, not 1.0. A 50 Hz tone scores 0.000.
+
+Measured (100 random files/corpus): LibriTTS 0.044 +/- 0.054 (median 0.032), LJSpeech
+0.035 +/- 0.024 (median 0.028) — i.e. **real speech noise floors sit ~15-20x below the white-noise
+ceiling**, because the quiet frames still carry low-frequency rumble and voiced tails. The corpora
+do not separate on the mean; LibriTTS separates on the *tail* (p95 0.125 vs 0.071, max 0.33 vs 0.15).
+Low outliers are the informative end and are genuine: the two lowest LibriTTS files peak at 47-59 Hz
+in their quiet frames (mains hum). Short clips (<2 s) bias low — their quiet frames still contain
+voiced harmonics. **Flatness alone cannot separate that artifact from real hum** — both score
+low. A high sub-120 Hz share narrows it down but does *not* establish hum: 3982_178459 has 88% of its
+floor below 120 Hz yet no tonal peak (5.1 dB), i.e. broadband rumble, not mains.
+
+**Do not use flatness as a hum detector.** Over 400 LibriTTS + 300 LJSpeech files, log-flatness vs
+measured hum strength correlates **-0.16 / +0.04** — effectively zero. A `flat < 0.005` gate reaches
+precision 0.54 / recall 0.11, and the five strongest-hum LibriTTS files have entirely normal flatness
+(0.0037-0.0354). Use the separate 50/60 Hz peak-vs-local-floor metric instead (peak within +/-4 Hz of
+50/60/100/120/150/180 Hz minus median of surrounding +/-12-30 Hz, on quiet frames, 8192-pt FFT). It
+gives 23.0 dB on the confirmed hum file vs <=13.3 dB for everything else — a 10 dB margin.
+**Calibrate that detector at ~15 dB, not the 6 dB in the table above**: at 6 dB it flags 42% of both
+corpora, since the median file already shows ~5 dB of ordinary variation at those frequencies.
+
+**DC offset corrupts any noise-floor measurement, and LibriTTS has it.** |DC| > 20 LSB in 4.2% of
+LibriTTS files (p99 505 LSB, max 1894); LJSpeech maxes out at 1.5 LSB across 400 files. A Hann-windowed
+DC term leaks into the lowest FFT bins, i.e. straight into the 20-120 Hz floor band. Clip
+4438_48513_000022_000000 (+96 LSB) measures a 26.3 dB speech-to-floor gap as shipped and 49.7 dB after
+subtracting the mean — a 23 dB error that flips the verdict. **Subtract the mean before framing.**
+
+**Unweighted speech-to-floor gap over-rejects LF rumble.** The same clip: floor -30 dB at 20-500 Hz vs
+-48.6 dB at 6-12 kHz, so the gap is dominated by frequencies you cannot hear. A-weighting drops the
+floor 23.7 dB but speech only 3.8 dB, taking the gap from 26.3 to 48.4 dB. Its quiet passages are
+-50.1 dBFS with 98 distinct sample values (a few LSBs of dither) — genuinely clean. If the gap is meant
+to mean "audible SNR", A-weight it and recalibrate the threshold upward.
+
+As a generic "quiet frames are suspiciously tonal" flag, `flat < 0.005` is the defensible lower bound
+— it sits below LJSpeech's observed minimum (p0.5 = 0.0075), costing LJSpeech 0.3% and LibriTTS 8.8%.
+
+**Confirmed case: LibriTTS speaker 3526 carries 60 Hz mains hum across all three chapters**
+(176651, 175658, 176653), at only 1-6 dB below speech level, with 120 Hz ~40 dB weaker — a dominant
+fundamental with near-absent second harmonic means induced pickup / ground loop, not supply ripple.
+A DC offset sits at 0 Hz at similar strength. Inaudible on laptop speakers (A-weighting at 60 Hz is
+-27 dB) but a zero-entropy periodic signal that Mimi encodes cheaply and binds to speaker identity.
+**Gate this one per speaker, not per chapter** — unlike the bandwidth defects, which are chapter-scoped.
+
 ### 1.1 Effective bandwidth in detail
 
 The most valuable Tier-0 filter for a 24 kHz codec model, and worth spelling out because the
