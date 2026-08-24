@@ -617,6 +617,60 @@ The two genuine defects it did find are both trailing-text mismatches: `7752_113
 with an unspoken `"Pee wee! Pee wee!`). Neither is visible in the trailing-gap flag, since the audio
 does not stop early - the reader simply never says the words.
 
+### Measured: which alignment signal detects which defect
+
+Injected-defect benchmark on 300 LJSpeech clips (>= 3 s, >= 12 words), MMS_FA on CPU, 146 min of
+audio in 285 s = **31x realtime** (91x on MPS per the scan above). LJSpeech transcripts are
+correct, so each clip is scored clean and then re-scored against 12 labelled corruptions sharing
+the same forward pass where possible. AUC vs the clean distribution:
+
+| detector | ins 1w | ins 6w | del 1w | del 6w | subst 30% | wrong text | word swap | audio -10% | audio -30% | audio +extra | mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **CTC loss/token** | 0.90 | 0.99 | 0.87 | 0.99 | 0.98 | 1.00 | 0.93 | 0.91 | 0.99 | 0.97 | **0.95** |
+| low-conf run | 0.88 | 0.99 | 0.82 | 0.81 | 0.91 | 0.95 | 0.87 | 0.88 | 0.99 | 0.82 | 0.89 |
+| 1 - mean conf | 0.86 | 0.98 | 0.50 | 0.49 | 0.95 | 1.00 | 0.90 | 0.89 | 0.99 | 0.53 | 0.79 |
+| maxrate | 0.79 | 1.00 | 0.45 | 0.34 | 0.65 | 0.73 | 0.68 | 0.79 | 1.00 | 0.49 | 0.69 |
+| max intra-path gap | 0.49 | 0.43 | 0.62 | 0.80 | 0.46 | 0.27 | 0.59 | 0.49 | 0.36 | 0.53 | 0.52 |
+| chars/s (no model) | 0.65 | 0.97 | 0.35 | 0.01 | 0.51 | 0.52 | 0.50 | 0.78 | 0.99 | 0.01 | 0.53 |
+| trailing gap | 0.50 | 0.47 | 0.50 | 0.51 | 0.50 | 0.47 | 0.47 | 0.00 | 0.01 | **0.95** | 0.45 |
+
+**Normalized CTC loss is the best single gate and is not close to being replaced** — it is at or
+near the top on every class. The per-word confidence aggregates are strictly worse, and
+`low_conf_run` / `max_gap` add nothing once loss is in (both < +0.05 recall at a matched 5%
+false-positive budget).
+
+**Only two signals are genuinely complementary**, measured as recall added over loss alone at the
+same 5% FP budget:
+
+- **trailing gap** — `audio_extra_speech` +0.12. Loss barely moves when the audio continues past
+  the transcript, because every transcript token still aligns happily; only the unconsumed tail
+  shows it. This is the one defect loss systematically under-detects.
+- **maxrate** — small insertions +0.16 (1 word) / +0.13 (2 words) and mild audio truncation +0.24.
+
+**Detection floor: 1-2 word errors are effectively invisible at a strict operating point.** At a
+1% FP budget loss recalls 0.03 of single-word insertions and 0.02 of single-word deletions,
+rising to 0.79 / 0.71 at six words. Alignment scoring is a gate against *grossly* wrong
+transcripts, not a proofreader — expect it to pass small ASR-style substitutions, which matters
+because pseudo-labelled corpora (Granary, YODAS) fail exactly that way.
+
+**Clean-transcript calibration on LJSpeech** (thresholdable numbers): loss/token median 0.089,
+p90 0.53, **p99 2.92**; maxrate median 18.7, p99 26.7; trailing gap median 0.16 s, p99 0.32 s.
+The p99 sits well above LibriTTS's 2.11 for the documented reason — LJSpeech is dense in spoken
+numerals and initials ("Gene C. Akin", "in eighteen forty-four"), which MMS reads badly. At the
+p99 gate, 6% of number-bearing clean clips are flagged versus 0% for `low_conf_run`.
+
+**Two implementation traps that silently destroy the scores.** Both produce plausible-looking
+output rather than an error:
+
+1. `MMS_FA.get_model()` defaults to **`with_star=True`**, which appends an "any token" class
+   carrying probability 1.0 in every frame (emissions sum to 2.0). It absorbs precisely the
+   mismatches being detected. Use `get_model(with_star=False)` and `get_dict(star=None)`.
+2. The bundle **already returns log-probabilities**; an extra `log_softmax` re-normalizes over
+   the star class. With both bugs present, clean LJSpeech scored median loss 2.86 and mean
+   confidence 0.49 — self-consistent, ~30x too high, and it would have gated away the corpus.
+3. `'-'` is the **blank symbol at index 0** in the MMS dictionary. Keeping hyphens in the
+   normalized text puts a blank into the target and `forced_align` rejects it.
+
 ### Free pre-filters (no model at all)
 
 Run before the CTC pass to kill obvious junk at zero cost:
