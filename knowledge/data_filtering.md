@@ -478,6 +478,40 @@ corpus sizes.
   prosody-bin histogram entropy, diphone coverage, and question/exclamation fraction before
   and after. If entropy didn't move, the selector isn't doing anything.
 
+### Measured: once you stratify, facility-location *inside* a cell hurts
+
+Benchmark in `scratch/bench_select.py` — 7891 LibriTTS clips / 600 speakers, budget 200,
+2 clips per speaker, scored on interpretable marginals plus a PCA of the raw contour that no
+selector optimizes. Named strata + water-fill is what produces the diversity gain; the
+within-cell rule then only decides *where inside the cell* the picks land:
+
+| within-cell rule | tail-decile share | held-out cell entropy | octave slips /1k frames | mean dur |
+|---|---|---|---|---|
+| facility location (current) | 0.072 | 5.16 | 2.05 | 8.3 s |
+| random | 0.142 | 5.45 | 2.86 | 7.2 s |
+| ∝ kNN radius² | 0.172 | 5.33 | 3.27 | 6.6 s |
+| maximin / DPP | 0.29–0.35 | 4.5–5.2 | 3.1–5.8 | 5.0–6.2 s |
+| (random baseline, no strata) | 0.126 | 5.52 | 2.59 | 7.2 s |
+
+Facility location picks each cell's *centre*, so it lands **below random** on tail coverage
+(0.072 vs 0.126) and on held-out cell entropy, and it causes the long-clip drift — replacing it
+with random-within-cell removes both at equal cell entropy and rising-final fraction. The
+"prefer facility-location over dispersion" advice above applies to *unstratified* selection;
+inside a cell the representativeness reward is already redundant with the strata.
+
+The outlier trap is real and quantifiable: maximin and greedy-DPP raise the octave-slip rate to
+2.5× the pool's, `radius²` to 1.4×, random-within-cell to 1.2×. The gap narrows with budget —
+at 600/7891 facility location's tail deficit shrinks to 0.116 vs 0.142.
+
+**Representation matters much less than expected.** Same benchmark, `scratch/bench_rep_eval.py`:
+DCT(1–4)+stats, DCT(1–8), Legendre, 8 segment means and PCA-8 of the 64-point contour are
+indistinguishable (LJSpeech question-vs-statement AUC 0.82–0.83 ± 0.09, 1-NN speaker leakage
+0.006–0.013). Percentile/rise-fall *functionals* (GeMAPS-style) are clearly **worse**: AUC 0.70,
+speaker leakage 0.022, mean η² 0.35, and effective dimensionality 0.34 vs 0.83 — the percentiles
+are redundant with `st_range`. Swapping the feature space under a fixed selector changes nothing
+measurable. Caveat: every shape feature has low split-half reliability (r = 0.04–0.26), i.e. the
+contour shape is not a stable property of a whole clip.
+
 ### Encoding the "prosodic range over consistency" preference
 
 Define a scalar **expressiveness score** (semitone F0 std + F0 range percentile + energy
@@ -523,6 +557,65 @@ flags = {
     "dur_outlier": iqr_outlier_frac(ends - starts, phone_prior),
 }
 ```
+
+**Measured on 6,000 random LibriTTS clips (`torchaudio` MMS_FA, M4 Pro / MPS, 10.6 h audio in
+7 min = 91x realtime).** Loss per token: median 0.116, p95 0.80, p99 2.11, max 6.56.
+
+Two calibration facts, both of which invalidate a naive global threshold:
+
+1. **The tail is duration-driven.** Global corr(log loss, log duration) is only -0.06, but the
+   *tail* is not: clips under 1 s have median loss 0.87 and p95 3.34, versus 0.11 / 0.40 above 4 s.
+   A single corpus-wide threshold therefore selects almost nothing but short clips. Gate per
+   duration bin, or require >= 2 s.
+2. **MMS_FA cannot read spoken numerals, and this dominates the outliers.** Of the 20 worst
+   clips (>= 2 s), **18 have a correct transcript** and score badly only because they contain
+   dates or numbers ("wednesday december twelfth seventeen eighty seven" -> loss 5.28, the worst
+   in the whole sample). Cross-checked with `WAV2VEC2_ASR_BASE_960H`, which transcribes every one
+   of them correctly, so the audio is fine and the text is fine. MMS's emissions simply go
+   near-blank over spoken number sequences. **Precision of the raw top-20 is 10%.** Screen
+   candidates for number words before treating a high loss as a transcript defect, or confirm
+   with a second aligner.
+
+**Separating real defects from pronunciation false positives: local character rate.** The two
+failure classes are separable, but not by the loss. When the transcript contains words the audio
+does not, the aligner has nowhere to put them: it crams them into a fraction of a second, one
+frame per token, and the *realized speaking rate* over that stretch explodes. A mispronounced or
+unreadable word (the numeral class) still occupies roughly its true time span - it just gets a
+low posterior. So score the maximum local character rate over any window of 4-8 consecutive
+words, using the forced-alignment spans:
+
+```python
+# W = per-word dicts from merge_tokens: st, en (seconds), nch (chars)
+maxrate = max(sum(x["nch"] for x in W[a:a+n]) / max(W[a+n-1]["en"] - W[a]["st"], 1e-3)
+              for n in (4, 6, 8) for a in range(len(W) - n + 1))
+```
+
+MMS emits at 50 Hz, so **50 chars/s is the hard ceiling** - hitting it means "the aligner ran out
+of frames", which is exactly the defect. Measured on the 6,000-clip scan (clips >= 5 s, `loss > 1.0`
+as a pre-filter, then `maxrate > 30`): **4 clips flagged, all 4 confirmed real** by an independent
+`WAV2VEC2_ASR_BASE_960H` decode - `7752_113336_000009_000002`, `7226_86964_000012_000007`,
+`114_129324_000078_000001`, `209_4733_000007_000004`, each an audio that stops several words before
+its transcript does. All four sit at 49.9-50.0 chars/s; the three numeral false positives that the
+same pre-filter let through sit at 19.3-22.0. **Precision goes from 10% (raw loss ranking) to 100%
+on this sample**, at a 0.25% flag rate over 400 random background clips.
+
+Validated separately on 120 clean clips with a 6-word phrase inserted (the defect) against 80
+genuine numeral-heavy clips (the false positives): AUC 0.988 for `maxrate`, versus 0.951 for the
+CTC loss itself. Insertion position does not matter (0.988 mid-sentence vs 0.988 at the end).
+Two runner-up features: longest run of consecutive words with confidence < 0.3 (`>= 5` words; AUC
+0.952, but it also flagged all three numeral false positives on real data) and minimum per-word
+confidence (AUC 0.989, but it saturates at exactly 0.0 for both classes, so it depends on float
+underflow - do not use it). The obvious "tokens compressed to a single frame" count does **not**
+work (AUC 0.60): ordinary alignments already compress most tokens to one frame.
+
+Limits: recall is unmeasured - this only catches insertions long enough to force cramming, and
+every confirmed case here was a trailing truncation. The `loss > 1.0` pre-filter matters, since
+`maxrate > 30` alone fires on 1.75% of random clips.
+
+The two genuine defects it did find are both trailing-text mismatches: `7752_113336_000009_000002`
+(audio ends ~10 words before the transcript does) and `1743_142913_000006_000003` (transcript ends
+with an unspoken `"Pee wee! Pee wee!`). Neither is visible in the trailing-gap flag, since the audio
+does not stop early - the reader simply never says the words.
 
 ### Free pre-filters (no model at all)
 
@@ -576,6 +669,58 @@ SONAR on the ambiguous middle band. (Omnilingual SONAR, 2026, extends language c
 
 The 35% is a starting threshold, not a truth. Being able to re-cut at 50% or 20% without
 recomputing is worth more than getting the threshold right the first time.
+
+---
+
+## Sampling YODAS/OWSM v4 without downloading it
+
+`espnet/yodas_owsmv4` is 18.5 TB, but individual clips are reachable over HTTP range reads.
+Audio lives once in `dump/raw/org/yodas0.00/data/format.{1..500}/data_wav.ark`; the
+`yodas0.00` / `yodas0.10` subsets are metadata only, and their `wav.scp` lines are
+`uttid <ark_path>:<byte_offset>`. An entry at that offset is `AUDIO` + one length-size byte
++ that many little-endian length bytes + a FLAC blob — `kaldiio.matio.read_kaldi` on a
+`BytesIO` of a ranged fetch decodes it. `text` / `text.ctc` / `text.prev` are sorted by uttid,
+so a transcript is a ~22-probe binary search over ranged reads. Language is the second-to-last
+`_`-field of the uttid; Polish is ~0.6% of utterances and heavily clustered per recording,
+so sample many scattered windows and dedupe by recording id.
+
+Running the Tier-0 metrics on 100 such Polish clips: effective bandwidth and clipping ratio
+carry no signal — YODAS is uniformly 16 kHz with the cutoff at Nyquist on 100/100 files, and
+the clipped-run ratio is 0.0 on 100/100. Mains hum never exceeds 11 dB. NISQA is the only
+metric that separates the corpus (MOS 1.28-4.98, median 3.41), and its gate rejects 38%.
+Noise-floor flatness *correlates positively* with MOS here (r=0.45; 7 of the 8 files above
+flatness 0.25 score MOS > 4), so the 0.25 upper bound is inverted on web audio — those files
+survive only via the speech-to-floor gap escape hatch, which is the term that actually tracks
+quality (r=0.60). The flatness lower bound still works: both files it rejected are dead-floor
+lossy re-encodes.
+
+The 16 kHz rate is OWSM's packaging, not the source: YODAS2 stores the same recordings at
+24 kHz (`data/<lang>NNN/audio/%08d.tar.gz`, long-form, one wav per video). The uttid maps
+back exactly — strip the last four `_`-fields to get the YODAS2 `audio_id` (recording ids
+themselves contain `_`, so never split on the first one), and the remaining two fields are
+start/end in milliseconds. Verified on `Bdqhs1oUKWy`: the 24 kHz slice resampled to 16 kHz
+matches the OWSM clip sample-for-sample (corr 1.0, 2-sample resampler lag), and its content
+is genuinely full-band to 12 kHz, so the extra octave is real rather than resampler padding.
+Cost: audio ships as ~1.4 GB gzipped tars with no random access, but `tarfile` in streaming
+mode ("r|gz") over the HTTP response can stop at the wanted member — 14 s for a clip that sat
+5 members in. Batch by shard. Polish exists only as `pl000` (manual captions, 9,650 videos,
+140 shards); all 100 sampled clips map into it. 24 kHz is the hard ceiling — anything above
+that needs bandwidth extension or re-downloading from YouTube.
+
+Existing filtered derivatives of YODAS2, so the same cleaning is not repeated:
+`espnet/yodas_owsmv4` (166k h, 75 langs, 16 kHz, alignment/LID cleaning only — no audio-quality
+filter); `amphion/Emilia-Dataset` Emilia-YODAS split (113.9k h, TTS-grade, DNSMOS in the
+metadata, CC BY 4.0, but only en/de/fr/ko/ja/zh — no Polish); `sarulab-speech/yodas2_sidon`
+(all 148 langs incl. `pl000`, 24 kHz FLAC webdataset, Sidon restoration applied — enhanced
+audio, so HF tags it synthetic and the restorer's artefacts are baked into the target);
+`espnet/yodas-granary` (NVIDIA Granary, 23 EU langs incl. Polish, Whisper-large-v3 pseudo-labels
+repunctuated by Qwen2.5-7B, 16 kHz, transcript quality rather than audio quality);
+`BSC-LT/distilled-yodas-spanish` (8k h, consensus of three transcription systems).
+Nothing published covers Polish at TTS quality and unrestored 24 kHz — that gap is exactly what
+this pipeline fills. The gap is language-specific, not YODAS-specific: every large TTS corpus
+stops at the top ~10 languages and Polish is below the cut. Spanish is well served
+(`LEMAS-Dataset-train` 21.2k h, VoxpopuliTTS 10k h DNSMOS-tiered, CML-TTS 443 h);
+Polish gets CML-TTS at **38.9 h** of LibriVox audiobook (24 kHz, CC-BY-4.0) and little else.
 
 ---
 
