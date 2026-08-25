@@ -46,4 +46,5 @@ class HiggsCodec:
 
         with torch.inference_mode():
             values = self.model.decode(tokens.to(self.model.device).unsqueeze(0))
-        return values.audio_values[0].cpu().numpy()
+        # audio_values is (batch, channel, T); the codec is mono
+        return values.audio_values[0].reshape(-1).cpu().numpy()

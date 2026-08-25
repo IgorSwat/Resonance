@@ -34,7 +34,8 @@ CONFIG = pathlib.Path("configurations/quality_filtering.yaml")
 REJECTED = pathlib.Path("tmp/rejected")
 ACCEPTED = pathlib.Path("tmp/accepted")
 DUMP_SAMPLE = 100                       # clips copied for listening, drawn uniformly
-COLUMNS = ("dataset", "name", "transcription", "speaker_id")
+COLUMNS = ("dataset", "name", "transcription", "speaker_id", "language")
+LANGUAGE = "en"         # LibriTTS is English-only
 SEPARATOR = "|"
 
 
@@ -143,7 +144,7 @@ def main():
 
             verdicts[verdict] += 1
             if verdict is QualityVerdict.ACCEPTED:
-                writer.writerow((DATASET, name, transcript, name.split("_")[0]))
+                writer.writerow((DATASET, name, transcript, name.split("_")[0], LANGUAGE))
                 handle.flush()
                 accepted.append((name.split("_")[0], duration))
                 accepted_sample.add((path, duration))
