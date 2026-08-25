@@ -2,6 +2,7 @@ from dataclasses import dataclass, field, fields
 from enum import Enum
 
 from tools.metrics.ctc_alignment_metric import DEFAULT_RBOUND as CTC_RBOUND
+from tools.metrics.multi_speaker import DEFAULT_RBOUND as SPEAKER_RBOUND
 from tools.metrics.nisqa import DEFAULT_LBOUND as NISQA_LBOUND
 
 
@@ -18,6 +19,7 @@ class QualityVerdict(Enum):
     MAINS_HUM = "mains_hum"
     SPECTRAL_FLATNESS = "spectral_flatness"
     NISQA = "nisqa"
+    MULTI_SPEAKER = "multi_speaker"
     CTC_ALIGNMENT = "ctc_alignment"
 
     @property
@@ -53,6 +55,10 @@ class QualityConfig:
         default_factory=lambda: {**NISQA_LBOUND, "mos": 3.5, "noisiness": 3.5, "loudness": 3.0}
     )
     nisqa_max_duration: float = 50.0
+
+    multi_speaker_enabled: bool = True
+    multi_speaker_max: dict = field(default_factory=lambda: dict(SPEAKER_RBOUND))
+    multi_speaker_device: str | None = None
 
     ctc_enabled: bool = True
     ctc_max: dict = field(default_factory=lambda: dict(CTC_RBOUND))

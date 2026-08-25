@@ -6,6 +6,7 @@ from tools.metrics.ctc_alignment_metric import CtcAlignmentMetric
 from tools.metrics.effective_bandwidth import EffectiveBandwidthMetric
 from tools.metrics.mains_hum import MainsHumMetric
 from tools.metrics.metric import Metric
+from tools.metrics.multi_speaker import MultiSpeakerMetric
 from tools.metrics.nisqa import NisqaMetric
 from tools.metrics.spectral_flatness import SpectralFlatnessMetric
 from tools.metrics.types import QualityConfig, QualityVerdict
@@ -22,8 +23,8 @@ class Pipeline:
     """
     Quality cascade: cheapest filter first, stopping at the first stage that rejects.
 
-    DSP stages run before the two model stages, so most rejects cost microseconds and the
-    NISQA and CTC forward passes only ever see audio that already survived. Ordering is the
+    DSP stages run before the model stages, so most rejects cost microseconds and the NISQA,
+    segmentation and CTC forward passes only ever see audio that already survived. Ordering is the
     cascade of knowledge/data_filtering.md; the audio is accepted only if every stage passes.
 
     The CTC stage scores the transcript it is given, so audio without one cannot be verified
@@ -97,6 +98,14 @@ class Pipeline:
                 {"lbound": config.nisqa_min},
             ),
         ]
+        if config.multi_speaker_enabled:
+            stages.append(
+                Stage(
+                    QualityVerdict.MULTI_SPEAKER,
+                    MultiSpeakerMetric(device=config.multi_speaker_device),
+                    {"rbound": config.multi_speaker_max},
+                )
+            )
         if config.ctc_enabled:
             stages.append(
                 Stage(

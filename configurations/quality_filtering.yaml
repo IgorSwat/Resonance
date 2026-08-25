@@ -6,8 +6,8 @@
 # per source corpus, since audiobook, parliamentary and web audio have different baselines.
 
 # Shared floor, checked before any metric runs.
-min_duration: 5.0
-max_duration: 30.0               # long clips also break NISQA, which raises above ~50 s
+min_duration: 3.0
+max_duration: 30.0               
 
 # Fraction of Nyquist still carrying speech. 0.85 keeps 96% of LibriTTS and 100% of LJSpeech;
 # it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
@@ -38,6 +38,13 @@ nisqa_min:
   coloration: 3.5
   loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest
 nisqa_max_duration: 50.0         # NISQA raises above ~50 s; chunk long-form audio first
+
+# Speech from a second speaker, in seconds (pyannote segmentation 3.0).
+multi_speaker_enabled: true      # false skips the stage entirely, and its model load
+multi_speaker_max:
+  second: 0.0                    # 2nd-most-active speaker, overlapping or not
+  overlap: 0.0                   # two speakers at once
+multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
 
 # CTC forced alignment against the transcript (MMS_FA). loss+maxrate catch audio clipped
 # mid-transcript; gap_speech/trail_speech catch audio saying more than the transcript does.
