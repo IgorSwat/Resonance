@@ -1,0 +1,57 @@
+# Quality-filtering cascade for tools.metrics.pipeline.Pipeline.
+#
+# Load with QualityConfig.from_yaml("configurations/quality_filtering.yaml"). Every key is
+# optional and falls back to the dataclass default. The values below are the calibrated
+# defaults from knowledge/data_filtering.md — treat them as a starting point and re-derive
+# per source corpus, since audiobook, parliamentary and web audio have different baselines.
+
+# Shared floor, checked before any metric runs.
+min_duration: 3.0
+max_duration: 25.0               
+
+# Fraction of Nyquist still carrying speech. 0.85 keeps 96% of LibriTTS and 100% of LJSpeech;
+# it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
+bandwidth_min_frac: 0.85
+bandwidth_band_hz: 1000.0        # drop to 500.0 when per-file cutoff precision matters
+
+# Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
+clipping_max_ratio: 0.0001
+
+# Mains hum in dB above the surrounding floor, enforced only when the line locks onto 50/60 Hz.
+# Calibrated at 15 dB: at the 6 dB of the original note, 42% of clean corpora are flagged.
+hum_max_prominence: 15.0
+hum_freq_tolerance: 0.3
+
+# Noise-floor spectral flatness. The ceiling is 0.56 (white noise), not 1.0. The lower bound
+# catches tonal floors; the upper bound only applies when speech fails to rise
+# flatness_loudness_threshold dB (A-weighted) above the floor.
+flatness_min: 0.0005
+flatness_max: 0.25
+flatness_loudness_threshold: 35.0
+
+# NISQA v2.0, 1-5 per dimension. Gate on discontinuity and coloration: they are ~3x more
+# stable than MOS and noisiness, which move with content alone.
+nisqa_min:
+  mos: 3.25
+  noisiness: 3.3                 
+  discontinuity: 4.0
+  coloration: 3.5
+  loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest
+nisqa_max_duration: 50.0         # NISQA raises above ~50 s; chunk long-form audio first
+
+# Speech from a second speaker, in seconds (pyannote segmentation 3.0).
+multi_speaker_enabled: false      # false skips the stage entirely, and its model load
+multi_speaker_max:
+  second: 0.0                    # 2nd-most-active speaker, overlapping or not
+  overlap: 0.0                   # two speakers at once
+multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
+
+# CTC forced alignment against the transcript (MMS_FA). loss+maxrate catch audio clipped
+# mid-transcript; gap_speech/trail_speech catch audio saying more than the transcript does.
+ctc_enabled: false                # false skips the stage entirely, for untranscribed audio
+ctc_max:
+  loss: 1.0
+  maxrate: 30.0
+  gap_speech: 0.06
+  trail_speech: 0.05
+ctc_device: null                 # null -> CUDA, else MPS, else CPU

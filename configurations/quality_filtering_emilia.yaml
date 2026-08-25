@@ -7,7 +7,7 @@
 
 # Shared floor, checked before any metric runs.
 min_duration: 3.0
-max_duration: 30.0               
+max_duration: 25.0               
 
 # Fraction of Nyquist still carrying speech. 0.85 keeps 96% of LibriTTS and 100% of LJSpeech;
 # it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
