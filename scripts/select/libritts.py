@@ -36,6 +36,7 @@ DATASET = "LibriTTS"
 ROOT = pathlib.Path("data/LibriTTS")
 ACCEPTED = pathlib.Path("tmp/accepted")
 DUMP_SAMPLE = 100
+MIN_PER_SPEAKER = 5
 COLUMNS = ("dataset", "name", "transcription", "speaker_id")
 SEPARATOR = "|"
 DIALECT = {"delimiter": SEPARATOR, "quotechar": None, "quoting": csv.QUOTE_NONE, "escapechar": "\\"}
@@ -86,12 +87,25 @@ def main():
     speakers = {row["speaker"] for row in rows}
     budget = args.per_speaker * len(speakers)
     selected = select_diverse(rows, budget, speaker_cap=args.per_speaker, seed=args.seed)
+    selected = drop_thin_speakers(selected)
     write(args.output, selected)
 
     baseline = capped_random(rows, len(selected), args.per_speaker, args.seed)
     report(rows, selected, baseline, budget, args.output)
     if args.dump_accepted:
         dump_accepted(selected, args.seed)
+
+
+def drop_thin_speakers(selected):
+    """A speaker the pool could only fill a few slots for is not worth keeping."""
+
+    counts = collections.Counter(row["speaker"] for row in selected)
+    kept = [row for row in selected if counts[row["speaker"]] >= MIN_PER_SPEAKER]
+    thin = len(counts) - len({row["speaker"] for row in kept})
+    if thin:
+        print_info("dropped", f"{thin} speakers with fewer than {MIN_PER_SPEAKER} clips "
+                              f"({len(selected) - len(kept)} clips)")
+    return kept
 
 
 def read_pool(path):
