@@ -26,3 +26,5 @@ EXPR_EDGES = [10, 35, 65, 90]   # percentiles: the extreme deciles get their own
 RATE_BINS = 4                   # x 3 phrase-final classes = 60 cells
 SLOPE_LEVEL = 5.0               # |st/s| below this counts as level
 DEFAULT_SPEAKER_CAP = 2
+DEFAULT_FLOOR = 7               # a speaker below this contributes nothing
+DEFAULT_CEILING = 20            # and grows toward this only while it flattens the histogram

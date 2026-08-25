@@ -1,8 +1,12 @@
 import collections
+import math
+import random
 
 import numpy as np
 
 from tools.prosody.constants import (
+    DEFAULT_CEILING,
+    DEFAULT_FLOOR,
     DEFAULT_SPEAKER_CAP,
     EXPR_EDGES,
     RATE_BINS,
@@ -135,4 +139,82 @@ def select_diverse(rows, budget, speaker_cap=DEFAULT_SPEAKER_CAP, seed=0):
                 selected.append(row)
                 taken[row["speaker"]] += 1
                 picked += 1
+    return selected
+
+
+def _entropy(counts, total):
+    return math.log2(total) - sum(n * math.log2(n) for n in counts.values()) / total
+
+
+def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0):
+    """
+    Select rows under a per-speaker floor and ceiling, taking as much data as stays flat.
+
+    Every speaker holding at least `floor` rows contributes exactly that many, spread over
+    their rarest cells; speakers below the floor are dropped. Beyond the floor, rows are drawn
+    from the thinnest cell for as long as each one strictly raises the cell histogram's
+    entropy, so a speaker approaches `ceiling` only while their rows still land where the
+    histogram is short.
+
+    Unlike select_diverse there is no budget: the draw stops when nothing flattens further.
+    """
+
+    rng = random.Random(seed)
+    for row, cell in zip(rows, assign_cells(rows)):
+        row["cell"] = cell
+
+    by_speaker = collections.defaultdict(list)
+    for row in rows:
+        by_speaker[row["speaker"]].append(row)
+    rarity = collections.Counter(row["cell"] for row in rows)
+
+    taken, counts, selected = collections.Counter(), collections.Counter(), []
+    for speaker, clips in sorted(by_speaker.items()):
+        if len(clips) < floor:
+            continue
+        buckets = collections.defaultdict(list)
+        for row in clips:
+            buckets[row["cell"]].append(row)
+        for bucket in buckets.values():
+            rng.shuffle(bucket)
+        order = sorted(buckets, key=lambda cell: rarity[cell])
+        while taken[speaker] < floor:
+            for cell in order:
+                if buckets[cell] and taken[speaker] < floor:
+                    row = buckets[cell].pop()
+                    selected.append(row)
+                    counts[row["cell"]] += 1
+                    taken[speaker] += 1
+
+    chosen = {id(row) for row in selected}
+    available = collections.defaultdict(list)
+    for row in rows:
+        if id(row) not in chosen and taken[row["speaker"]]:
+            available[row["cell"]].append(row)
+    for bucket in available.values():
+        rng.shuffle(bucket)
+
+    total = len(selected)
+    weight = sum(n * math.log2(n) for n in counts.values())
+    while True:
+        live = [cell for cell in available if available[cell]]
+        if not live:
+            break
+        cell = min(live, key=lambda cell: counts[cell])
+        n = counts[cell]
+        gain = (n + 1) * math.log2(n + 1) - (n * math.log2(n) if n else 0)
+        if math.log2(total + 1) - (weight + gain) / (total + 1) <= _entropy(counts, total):
+            break
+        row = None
+        while available[cell] and row is None:
+            candidate = available[cell].pop()
+            if taken[candidate["speaker"]] < ceiling:
+                row = candidate
+        if row is None:
+            continue
+        selected.append(row)
+        counts[cell] += 1
+        taken[row["speaker"]] += 1
+        total += 1
+        weight += gain
     return selected

@@ -1,10 +1,12 @@
 """Select a prosodically varied subset of the filtered LibriTTS CSV.
 
-    python scripts/select/libritts.py --per-speaker 7
+    python scripts/select/libritts.py --min-per-speaker 7 --max-per-speaker 20
 
 Takes the output of scripts/filter/libritts.py as the input pool, scores every clip with
-tools/prosody, and picks clips whose prosody-cell histogram is as flat as the pool allows,
-targeting --per-speaker clips from each speaker. Random selection reproduces the source
+tools/prosody, and picks clips whose prosody-cell histogram is as flat as the pool allows.
+Every speaker with enough clips contributes --min-per-speaker of them, then grows toward
+--max-per-speaker for as long as each further clip still flattens the histogram, so the
+subset size is decided by the pool rather than fixed up front. Random selection reproduces the source
 distribution, which for audiobooks is mode-collapsed onto flat narration; the comparison the
 script prints is what tells you whether the selection actually moved anything.
 """
@@ -25,18 +27,17 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from scripts.__style__ import (Colors, print_info, print_section, print_separator,
                                print_summary_line, print_test_title)
-from tools.prosody.constants import MIN_DURATION, SLOPE_LEVEL
+from tools.prosody.constants import DEFAULT_CEILING, DEFAULT_FLOOR, MIN_DURATION, SLOPE_LEVEL
 from tools.prosody.contour import f0_contour
 from tools.prosody.features import prosody_features
 from tools.prosody.normalize import (adapted_range, clip_median, speaker_reference,
                                      to_semitones, within_octave_guard)
-from tools.prosody.selection import assign_cells, select_diverse
+from tools.prosody.selection import assign_cells, select_bounded
 
 DATASET = "LibriTTS"
 ROOT = pathlib.Path("data/LibriTTS")
 ACCEPTED = pathlib.Path("tmp/accepted")
 DUMP_SAMPLE = 100
-MIN_PER_SPEAKER = 5
 COLUMNS = ("dataset", "name", "transcription", "speaker_id")
 SEPARATOR = "|"
 DIALECT = {"delimiter": SEPARATOR, "quotechar": None, "quoting": csv.QUOTE_NONE, "escapechar": "\\"}
@@ -51,8 +52,10 @@ def parse_args():
     parser.add_argument("--output", type=pathlib.Path,
                         default=pathlib.Path("libritts_selected.csv"))
     parser.add_argument("--root", type=pathlib.Path, default=ROOT)
-    parser.add_argument("--per-speaker", type=int, default=7,
-                        help="target clips per speaker; the budget is this times the speaker count")
+    parser.add_argument("--min-per-speaker", type=int, default=DEFAULT_FLOOR,
+                        help="clips every kept speaker contributes; speakers with fewer are dropped")
+    parser.add_argument("--max-per-speaker", type=int, default=DEFAULT_CEILING,
+                        help="most a speaker may contribute, reached only by flattening the histogram")
     parser.add_argument("--limit", type=int, help="score only N random rows of the input pool")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dump-accepted", action="store_true",
@@ -70,7 +73,7 @@ def main():
     print_test_title(f"Selecting from {DATASET}: {len(pool)} filtered clips")
     print_info("input", args.input)
     print_info("output", args.output)
-    print_info("target", f"{args.per_speaker} clips per speaker")
+    print_info("bounds", f"{args.min_per_speaker}-{args.max_per_speaker} clips per speaker")
 
     paths = locate(args.root, {name for name, _, _ in pool})
     missing = [name for name, _, _ in pool if name not in paths]
@@ -84,28 +87,15 @@ def main():
     if not rows:
         raise SystemExit("Nothing to select from")
 
-    speakers = {row["speaker"] for row in rows}
-    budget = args.per_speaker * len(speakers)
-    selected = select_diverse(rows, budget, speaker_cap=args.per_speaker, seed=args.seed)
-    selected = drop_thin_speakers(selected)
+    selected = select_bounded(rows, args.min_per_speaker, args.max_per_speaker, seed=args.seed)
+    if not selected:
+        raise SystemExit(f"No speaker has {args.min_per_speaker} usable clips")
     write(args.output, selected)
 
-    baseline = capped_random(rows, len(selected), args.per_speaker, args.seed)
-    report(rows, selected, baseline, budget, args.output)
+    baseline = capped_random(rows, len(selected), args.max_per_speaker, args.seed)
+    report(rows, selected, baseline, args.output)
     if args.dump_accepted:
         dump_accepted(selected, args.seed)
-
-
-def drop_thin_speakers(selected):
-    """A speaker the pool could only fill a few slots for is not worth keeping."""
-
-    counts = collections.Counter(row["speaker"] for row in selected)
-    kept = [row for row in selected if counts[row["speaker"]] >= MIN_PER_SPEAKER]
-    thin = len(counts) - len({row["speaker"] for row in kept})
-    if thin:
-        print_info("dropped", f"{thin} speakers with fewer than {MIN_PER_SPEAKER} clips "
-                              f"({len(selected) - len(kept)} clips)")
-    return kept
 
 
 def read_pool(path):
@@ -204,7 +194,7 @@ def entropy(cells):
     return float(-(p * np.log2(p)).sum())
 
 
-def report(rows, selected, baseline, budget, output):
+def report(rows, selected, baseline, output):
     for row, cell in zip(rows, assign_cells(rows)):        # pool edges, never a subset's own
         row["cell"] = cell
     n_cells = len({row["cell"] for row in rows})
@@ -215,8 +205,7 @@ def report(rows, selected, baseline, budget, output):
     minutes = sorted(sum(row["dur"] for row in selected if row["speaker"] == speaker)
                      for speaker in per_speaker)
     print_summary_line("  clips", f"{len(selected)} of {len(rows)} "
-                                  f"({Colors.OKGREEN}{100 * len(selected) / len(rows):.1f}%{Colors.ENDC})"
-                                  f", target {budget}")
+                                  f"({Colors.OKGREEN}{100 * len(selected) / len(rows):.1f}%{Colors.ENDC})")
     print_info("total length", f"{sum(seconds) / 3600:.2f} h")
     print_info("average length", f"{sum(seconds) / len(seconds):.2f} s")
     print_info("speakers", len(per_speaker))
