@@ -7,7 +7,7 @@
 
 # Shared floor, checked before any metric runs.
 min_duration: 3.0
-max_duration: 25.0               
+max_duration: 30.0               
 
 # Fraction of Nyquist still carrying speech. 0.85 keeps 96% of LibriTTS and 100% of LJSpeech;
 # it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
@@ -32,8 +32,8 @@ flatness_loudness_threshold: 35.0
 # NISQA v2.0, 1-5 per dimension. Gate on discontinuity and coloration: they are ~3x more
 # stable than MOS and noisiness, which move with content alone.
 nisqa_min:
-  mos: 3.25
-  noisiness: 3.3                 
+  mos: 3.30
+  noisiness: 3.25                 
   discontinuity: 4.0
   coloration: 3.5
   loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest
@@ -45,6 +45,14 @@ multi_speaker_max:
   second: 0.0                    # 2nd-most-active speaker, overlapping or not
   overlap: 0.0                   # two speakers at once
 multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
+
+# Source-level second pass (scripts/filter/emilia.py only). pyannote merges clean turn-taking
+# between similar voices, so a conversational source leaks some of its clips into the accepted
+# set however the stage is tuned; judging the whole speaker catches those. At 0.5 this dropped
+# 8% of a batch on top of the per-clip stage and cost none of the labelled clean clips.
+source_rejection_enabled: true
+source_max_flag_rate: 0.5        # share of a speaker's scored clips the stage may reject
+source_min_clips: 3              # speakers with fewer scored clips are left alone
 
 # CTC forced alignment against the transcript (MMS_FA). loss+maxrate catch audio clipped
 # mid-transcript; gap_speech/trail_speech catch audio saying more than the transcript does.

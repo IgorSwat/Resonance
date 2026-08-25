@@ -7,6 +7,11 @@ JSON sidecar holding its transcript, speaker and language. --batch restricts the
 single shard; without it every batch directory under --root is filtered in one pass, which is
 rarely what you want — a shard is ~25k clips.
 
+Clips that survive the cascade go through a second, source-level pass: Emilia's diarisation
+leaks per source rather than per clip, so a speaker whose clips are rejected by the
+multi-speaker stage often enough is dropped whole. Configure it with source_rejection_enabled
+in the quality config.
+
 Use --limit while calibrating: it draws a random sample, so the rejection breakdown it prints
 tells you whether the configured bounds keep a sensible share of the corpus before committing
 to a full pass.
@@ -36,7 +41,7 @@ from tools.metrics.types import QualityConfig, QualityVerdict
 
 DATASET = "Emilia"
 ROOT = pathlib.Path("data/Emilia")
-CONFIG = pathlib.Path("configurations/quality_filtering.yaml")
+CONFIG = pathlib.Path("configurations/quality_filtering_emilia.yaml")
 REJECTED = pathlib.Path("tmp/rejected")
 ACCEPTED = pathlib.Path("tmp/accepted")
 DUMP_SAMPLE = 100                       # clips copied for listening, drawn uniformly
@@ -113,6 +118,10 @@ def main():
     print_info("config", args.config if args.config.exists() else "built-in defaults")
     print_info("output", args.output)
 
+    order = [stage.verdict for stage in Pipeline(config).stages]
+    second_pass = config.source_rejection_enabled and QualityVerdict.MULTI_SPEAKER in order
+    print_info("source pass", f"reject a speaker above {config.source_max_flag_rate:.0%} flagged "
+                              f"clips (min {config.source_min_clips})" if second_pass else "off")
     print_info("workers", args.workers)
     if args.dump_rejected:
         print_info("rejected sample", f"{DUMP_SAMPLE} clips -> {REJECTED}")
@@ -123,42 +132,93 @@ def main():
     accepted_sample = Reservoir(DUMP_SAMPLE, args.seed)
 
     verdicts = collections.Counter()
-    accepted, failures, start = [], 0, time.time()
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output, "w", newline="") as handle:
-        # No Emilia transcript in this corpus contains SEPARATOR or a backslash, so the writer
-        # never has to escape; quotechar=None leaves the ASR's own quotes as written.
-        writer = csv.writer(handle, delimiter=SEPARATOR, quotechar=None,
-                            quoting=csv.QUOTE_NONE, escapechar="\\")
-        writer.writerow(COLUMNS)
-        for index, (path, verdict, error, duration, meta) in enumerate(
-            scored(sidecars, config, args), 1
-        ):
-            if error:
-                print(f"{Colors.FAIL}{path.stem}: {error}{Colors.ENDC}")
-                failures += 1
-                continue
+    scored_clips, flagged_clips = collections.Counter(), collections.Counter()
+    rows, accepted, failures, start = [], [], 0, time.time()
+    for index, (path, verdict, error, duration, meta) in enumerate(
+        scored(sidecars, config, args), 1
+    ):
+        if error:
+            print(f"{Colors.FAIL}{path.stem}: {error}{Colors.ENDC}")
+            failures += 1
+            continue
 
-            verdicts[verdict] += 1
-            if verdict is QualityVerdict.ACCEPTED:
-                writer.writerow((DATASET, path.stem, meta["text"], meta["speaker"],
-                                 meta["language"]))
-                handle.flush()
-                accepted.append((meta["speaker"], duration))
-                accepted_sample.add((path, duration))
-            elif verdict not in (QualityVerdict.TOO_SHORT, QualityVerdict.TOO_LONG):
-                # length is a sourcing decision rather than a defect, so those are never dumped
-                rejected_sample.add((path, verdict, duration))
-            if index % 200 == 0:
-                rate = index / (time.time() - start)
-                print(f"  {index}/{len(sidecars)} clips, {rate:.1f}/s, "
-                      f"{100 * len(accepted) / index:.0f}% accepted", flush=True)
+        verdicts[verdict] += 1
+        if reached(verdict, order):
+            scored_clips[meta["speaker"]] += 1
+            flagged_clips[meta["speaker"]] += verdict is QualityVerdict.MULTI_SPEAKER
+        if verdict is QualityVerdict.ACCEPTED:
+            rows.append((DATASET, path.stem, meta["text"], meta["speaker"], meta["language"]))
+            accepted.append((meta["speaker"], duration))
+            accepted_sample.add((path, duration, meta["speaker"]))
+        elif verdict not in (QualityVerdict.TOO_SHORT, QualityVerdict.TOO_LONG):
+            # length is a sourcing decision rather than a defect, so those are never dumped
+            rejected_sample.add((path, verdict, duration))
+        if index % 200 == 0:
+            rate = index / (time.time() - start)
+            print(f"  {index}/{len(sidecars)} clips, {rate:.1f}/s, "
+                  f"{100 * len(rows) / index:.0f}% accepted", flush=True)
+
+    if second_pass:
+        sources = flagged_sources(scored_clips, flagged_clips, config)
+        rows, accepted, dropped = drop_sources(sources, rows, accepted, accepted_sample)
+        verdicts[QualityVerdict.ACCEPTED] -= dropped
+        verdicts[QualityVerdict.MULTI_SPEAKER_SOURCE] += dropped
+        print_info("sources rejected", f"{len(sources)} of {len(scored_clips)} speakers, "
+                                       f"{dropped} of their clips")
+    write(args.output, rows)
 
     if args.dump_rejected:
         dump_rejected(rejected_sample, config)
     if args.dump_accepted:
         dump_accepted(accepted_sample, config)
     report(verdicts, accepted, failures, time.time() - start, args.output)
+
+
+def reached(verdict, order):
+    """Whether the clip survived far enough for the multi-speaker stage to have scored it.
+
+    The cascade stops at its first rejection, so without this a speaker whose clips mostly died
+    on quality would look clean to the source pass simply for never having been scored.
+    """
+
+    if verdict is QualityVerdict.ACCEPTED:
+        return True
+    if verdict not in order:                    # rejected on length, before any stage ran
+        return False
+    return order.index(verdict) >= order.index(QualityVerdict.MULTI_SPEAKER)
+
+
+def flagged_sources(scored_clips, flagged_clips, config):
+    """Speakers the multi-speaker stage rejects often enough to distrust the whole source.
+
+    An Emilia speaker is one voice in one recording, so the leak is a property of the source:
+    pyannote merges clean turn-taking between similar voices, and a conversational source lands
+    some of its clips in the accepted set however the stage is tuned. Over the labelled clips,
+    the speaker's rate predicted a second voice better than the clip's own score did.
+    """
+
+    return {speaker for speaker, count in scored_clips.items()
+            if count >= config.source_min_clips
+            and flagged_clips[speaker] / count >= config.source_max_flag_rate}
+
+
+def drop_sources(sources, rows, accepted, accepted_sample):
+    """Remove every clip belonging to a rejected source, listening sample included."""
+
+    kept = [row for row in rows if row[3] not in sources]
+    accepted_sample.items = [item for item in accepted_sample.items if item[2] not in sources]
+    return (kept, [item for item in accepted if item[0] not in sources], len(rows) - len(kept))
+
+
+def write(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as handle:
+        # No Emilia transcript in this corpus contains SEPARATOR or a backslash, so the writer
+        # never has to escape; quotechar=None leaves the ASR's own quotes as written.
+        writer = csv.writer(handle, delimiter=SEPARATOR, quotechar=None,
+                            quoting=csv.QUOTE_NONE, escapechar="\\")
+        writer.writerow(COLUMNS)
+        writer.writerows(rows)
 
 
 def dump_rejected(sample, config):
@@ -186,7 +246,7 @@ def dump_accepted(sample, config):
     prepare(ACCEPTED)
     nisqa = NisqaMetric(min_duration=config.min_duration, max_duration=config.nisqa_max_duration)
     with open(ACCEPTED / "nisqa.txt", "w") as report_file:
-        for path, duration in sorted(sample.items):
+        for path, duration, _ in sorted(sample.items):
             audio, _ = load(path)
             shutil.copy2(path.with_suffix(".mp3"), ACCEPTED / f"{path.stem}.mp3")
             scores = nisqa.evaluate(audio)

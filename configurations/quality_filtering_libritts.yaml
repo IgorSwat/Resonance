@@ -7,7 +7,7 @@
 
 # Shared floor, checked before any metric runs.
 min_duration: 3.0
-max_duration: 25.0               
+max_duration: 30.0               
 
 # Fraction of Nyquist still carrying speech. 0.85 keeps 96% of LibriTTS and 100% of LJSpeech;
 # it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
@@ -33,7 +33,7 @@ flatness_loudness_threshold: 35.0
 # stable than MOS and noisiness, which move with content alone.
 nisqa_min:
   mos: 3.25
-  noisiness: 3.3                 
+  noisiness: 3.3              
   discontinuity: 4.0
   coloration: 3.5
   loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest

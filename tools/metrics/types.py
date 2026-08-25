@@ -20,6 +20,7 @@ class QualityVerdict(Enum):
     SPECTRAL_FLATNESS = "spectral_flatness"
     NISQA = "nisqa"
     MULTI_SPEAKER = "multi_speaker"
+    MULTI_SPEAKER_SOURCE = "multi_speaker_source"
     CTC_ALIGNMENT = "ctc_alignment"
 
     @property
@@ -57,6 +58,12 @@ class QualityConfig:
     nisqa_max_duration: float = 50.0
 
     multi_speaker_enabled: bool = True
+    # a source-level second pass, applied by the filter script rather than by the cascade: a
+    # speaker whose clips fail multi_speaker this often is a conversational source, so the rest
+    # of its clips are not trusted either
+    source_rejection_enabled: bool = True
+    source_max_flag_rate: float = 0.5
+    source_min_clips: int = 3
     multi_speaker_max: dict = field(default_factory=lambda: dict(SPEAKER_RBOUND))
     multi_speaker_device: str | None = None
 
