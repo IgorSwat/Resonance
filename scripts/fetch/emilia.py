@@ -7,17 +7,18 @@ flat: an mp3 and a JSON sidecar per clip. A batch lands in <output-dir>/<lang>-b
 scripts/filter/emilia.py expects.
 
 The dataset is gated, so accept its terms on the model page and have a token in HF_TOKEN or
-~/.cache/huggingface/token. Batches are ~2 GB each; a partial download resumes rather than
-restarting, and an already-unpacked batch is skipped.
+~/.cache/huggingface/token. Downloading needs aria2c on PATH. Batches are ~2 GB each; a
+partial download resumes rather than restarting, and an already-unpacked batch is skipped.
 """
 
 import argparse
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tarfile
 
-import requests
 from tqdm import tqdm
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -27,7 +28,8 @@ from scripts.__style__ import Colors, print_info, print_section, print_test_titl
 LANGUAGES = ("EN", "ZH", "DE", "FR", "JA", "KO")
 BASE_URL = "https://huggingface.co/datasets/amphion/Emilia-Dataset/resolve/main/Emilia"
 OUTPUT_DIR = pathlib.Path("data/Emilia")
-CHUNK = 1 << 20
+ARIA2 = ("--continue=true", "--auto-file-renaming=false", "--max-connection-per-server=8",
+         "--split=8", "--max-tries=10", "--retry-wait=30", "--console-log-level=warn")
 
 
 def parse_args():
@@ -52,7 +54,9 @@ def main():
     print_info("output", args.output_dir)
     print_info("archives", "kept" if args.keep_archives else "deleted after unpacking")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    headers = {"Authorization": f"Bearer {token()}"}
+    if not shutil.which("aria2c"):
+        raise SystemExit("No aria2c on PATH; install it (e.g. `apt install aria2`)")
+    bearer = token()
 
     clips = 0
     for batch in tqdm(ids, desc="batches", unit="batch", position=0, leave=True):
@@ -65,7 +69,7 @@ def main():
             continue
 
         archive = args.output_dir / f"{name}.tar"
-        download(f"{BASE_URL}/{args.lang}/{name}.tar", archive, headers)
+        download(f"{BASE_URL}/{args.lang}/{name}.tar", archive, bearer)
         clips += extract(archive, directory)
         if not args.keep_archives:
             archive.unlink()
@@ -87,31 +91,15 @@ def token():
     raise SystemExit("No HuggingFace token; set HF_TOKEN or run `huggingface-cli login`")
 
 
-def download(url, archive, headers):
-    """Stream the tar to disk, resuming a half-finished one rather than starting over."""
+def download(url, archive, bearer):
+    """Fetch the tar with aria2c: parallel connections, resume, and backoff on a 429."""
 
-    partial = archive.with_suffix(".tar.part")
-    done = partial.stat().st_size if partial.exists() else 0
-    ranged = dict(headers, Range=f"bytes={done}-") if done else headers
-
-    with requests.get(url, headers=ranged, stream=True, timeout=60) as response:
-        if response.status_code in (401, 403):
-            raise SystemExit(f"{Colors.FAIL}{response.status_code} for {url}: accept the dataset "
-                             f"terms on huggingface.co and check your token{Colors.ENDC}")
-        if done and response.status_code == 200:      # server ignored the range: start over
-            done = 0
-        response.raise_for_status()
-        total = int(response.headers.get("content-length", 0)) + done
-
-        with open(partial, "ab" if done else "wb") as handle, tqdm(
-            total=total or None, initial=done, unit="B", unit_scale=True, unit_divisor=1024,
-            desc=f"download {archive.stem}", position=1, leave=False
-        ) as bar:
-            for chunk in response.iter_content(chunk_size=CHUNK):
-                handle.write(chunk)
-                bar.update(len(chunk))
-
-    partial.rename(archive)
+    # Fed through stdin rather than argv so the token stays out of the process list.
+    request = "\n".join((url, f"  header=Authorization: Bearer {bearer}",
+                         f"  dir={archive.parent}", f"  out={archive.name}"))
+    if subprocess.run(["aria2c", *ARIA2, "--input-file=-"], input=request, text=True).returncode:
+        raise SystemExit(f"{Colors.FAIL}aria2c failed on {url}: on a 401 or 403, accept the "
+                         f"dataset terms on huggingface.co and check your token{Colors.ENDC}")
     return archive
 
 

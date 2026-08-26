@@ -56,6 +56,7 @@ class QualityConfig:
         default_factory=lambda: {**NISQA_LBOUND, "mos": 3.5, "noisiness": 3.5, "loudness": 3.0}
     )
     nisqa_max_duration: float = 50.0
+    nisqa_device: str | None = None
 
     multi_speaker_enabled: bool = True
     # a source-level second pass, applied by the filter script rather than by the cascade: a

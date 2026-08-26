@@ -90,14 +90,10 @@ class Pipeline:
                 ),
                 {"lbound": config.flatness_min, "rbound": config.flatness_max},
             ),
-            Stage(
-                QualityVerdict.NISQA,
-                NisqaMetric(
-                    min_duration=config.min_duration, max_duration=config.nisqa_max_duration
-                ),
-                {"lbound": config.nisqa_min},
-            ),
         ]
+        # before NISQA, though both are model stages: segmentation costs 19 ms against NISQA's
+        # 32 and rejects a larger share of what reaches it (38% against 19% on a batch of
+        # Emilia EN), so it is the cheaper filter of the two
         if config.multi_speaker_enabled:
             stages.append(
                 Stage(
@@ -106,6 +102,16 @@ class Pipeline:
                     {"rbound": config.multi_speaker_max},
                 )
             )
+        stages.append(
+            Stage(
+                QualityVerdict.NISQA,
+                NisqaMetric(
+                    min_duration=config.min_duration, max_duration=config.nisqa_max_duration,
+                    device=config.nisqa_device,
+                ),
+                {"lbound": config.nisqa_min},
+            )
+        )
         if config.ctc_enabled:
             stages.append(
                 Stage(

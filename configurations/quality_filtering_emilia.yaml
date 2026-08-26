@@ -32,12 +32,13 @@ flatness_loudness_threshold: 35.0
 # NISQA v2.0, 1-5 per dimension. Gate on discontinuity and coloration: they are ~3x more
 # stable than MOS and noisiness, which move with content alone.
 nisqa_min:
-  mos: 3.30
+  mos: 3.35
   noisiness: 3.25                 
   discontinuity: 4.0
   coloration: 3.5
   loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest
 nisqa_max_duration: 50.0         # NISQA raises above ~50 s; chunk long-form audio first
+nisqa_device: null               # null -> CUDA, else MPS, else CPU
 
 # Speech from a second speaker, in seconds (pyannote segmentation 3.0).
 multi_speaker_enabled: true      # false skips the stage entirely, and its model load

@@ -404,10 +404,15 @@ _aligner = None
 
 
 def _setup(config, verbose):
-    """One pipeline per worker. Single-threaded torch, or the processes fight over cores."""
+    """One pipeline per worker. Single-threaded torch, or the processes fight over cores.
+
+    TF32 costs the model stages nothing measurable — 4e-4 on a NISQA score — and takes the CTC
+    forward down by 30%.
+    """
 
     global _pipeline
     torch.set_num_threads(1)
+    torch.backends.cuda.matmul.allow_tf32 = True
     _pipeline = Pipeline(config, verbose=verbose)
     prepare_verbalizer(config, _pipeline)
 
@@ -489,7 +494,8 @@ def dump_accepted(sample, config):
     """Copy each sampled clip and record what NISQA thought of it."""
 
     prepare(ACCEPTED)
-    nisqa = NisqaMetric(min_duration=config.min_duration, max_duration=config.nisqa_max_duration)
+    nisqa = NisqaMetric(min_duration=config.min_duration, max_duration=config.nisqa_max_duration,
+                        device=config.nisqa_device)
     with open(ACCEPTED / "nisqa.txt", "w") as report_file:
         for path, duration, _ in sorted(sample.items):
             audio, _ = load(path)

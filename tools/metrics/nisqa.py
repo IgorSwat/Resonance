@@ -2,7 +2,13 @@ from typing import override
 
 import numpy as np
 import torch
-from torchmetrics.functional.audio.nisqa import non_intrusive_speech_quality_assessment
+# torchmetrics' public entry point pins the model to the CPU, so its parts are driven directly
+# instead; see NisqaMetric._predict.
+from torchmetrics.functional.audio.nisqa import (
+    _get_librosa_melspec,
+    _load_nisqa_model,
+    _segment_specs,
+)
 
 from tools.metrics.metric import Metric
 
@@ -16,9 +22,16 @@ class NisqaMetric(Metric):
     Single-ended speech quality prediction (NISQA v2.0), scored 1-5 on five dimensions.
     """
 
-    def __init__(self, min_duration=0.15, max_duration=50.0):
+    def __init__(self, min_duration=0.15, max_duration=50.0, device=None):
         self.min_duration = min_duration
         self.max_duration = max_duration
+        self.device = device or (
+            "cuda" if torch.cuda.is_available()
+            else "mps" if torch.backends.mps.is_available()
+            else "cpu"
+        )
+        self._model = None
+        self._args = None
 
     @override
     def evaluate(self, audio, transcript=None):
@@ -32,8 +45,31 @@ class NisqaMetric(Metric):
                 f"NISQA needs {self.min_duration}-{self.max_duration} s of audio, got {duration:.2f} s"
             )
 
-        scores = non_intrusive_speech_quality_assessment(torch.from_numpy(y), sample_rate)
-        return dict(zip(FIELDS, scores.tolist()))
+        return dict(zip(FIELDS, self._predict(y.reshape(1, -1), sample_rate)))
+
+    def _predict(self, waveform, sample_rate):
+        """NISQA's own forward, submodule by submodule, so the model can leave the CPU.
+
+        torchmetrics loads the checkpoint with map_location='cpu' and never moves it, which
+        leaves the framewise CNN — ~245 windows per clip, each a stack of six tiny convolutions
+        — on one core, at ~15x the GPU's cost. The mel spectrogram stays on the CPU because it
+        is librosa's.
+        """
+
+        if self._model is None:
+            model, self._args = _load_nisqa_model()
+            self._model = model.to(self.device).eval()
+        melspec = _get_librosa_melspec(waveform, sample_rate, self._args)
+        spec, windows = _segment_specs(torch.from_numpy(melspec), self._args)
+        windows = windows.expand(spec.shape[0])
+
+        # NISQA builds its padding masks with torch.arange, which without this lands them on
+        # the CPU beside activations the model has already moved.
+        with torch.inference_mode(), torch.device(self.device):
+            x = self._model.cnn(spec.to(self.device), windows)      # packing needs CPU lengths
+            x, counts = self._model.time_dependency(x, windows.to(self.device))
+            scores = torch.cat([pool(x, counts) for pool in self._model.pool_layers], dim=1)
+        return scores.reshape(-1).tolist()
 
     @override
     def validate(self, audio, lbound=None, rbound=None, transcript=None):
