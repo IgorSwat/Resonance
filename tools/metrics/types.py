@@ -67,6 +67,10 @@ class QualityConfig:
     multi_speaker_max: dict = field(default_factory=lambda: dict(SPEAKER_RBOUND))
     multi_speaker_device: str | None = None
 
+    # spelling digits out is a transcript rewrite rather than a filter, but it decides what the
+    # CTC stage is asked to align and what the CSV carries, so it belongs with the bounds
+    verbalize_numbers_enabled: bool = False
+
     ctc_enabled: bool = True
     ctc_max: dict = field(default_factory=lambda: dict(CTC_RBOUND))
     ctc_device: str | None = None

@@ -7,6 +7,11 @@ JSON sidecar holding its transcript, speaker and language. --batch restricts the
 single shard; without it every batch directory under --root is filtered in one pass, which is
 rarely what you want — a shard is ~25k clips.
 
+With verbalize_numbers_enabled, digits in the transcript are spelled out in the clip's own
+language before anything reads it — so the CTC stage aligns against what was actually spoken,
+and the CSV carries text a TTS model can be trained on. num2words has no Chinese, so zh
+transcripts pass through unchanged.
+
 Clips that survive the cascade go through a second, source-level pass: Emilia's diarisation
 leaks per source rather than per clip, so a speaker whose clips are rejected by the
 multi-speaker stage often enough is dropped whole. Configure it with source_rejection_enabled
@@ -20,16 +25,19 @@ to a full pass.
 import argparse
 import collections
 import csv
+import itertools
 import json
 import multiprocessing
 import pathlib
 import random
+import re
 import shutil
 import sys
 import time
 
 import soundfile as sf
 import torch
+from num2words import num2words
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
@@ -47,6 +55,12 @@ ACCEPTED = pathlib.Path("tmp/accepted")
 DUMP_SAMPLE = 100                       # clips copied for listening, drawn uniformly
 COLUMNS = ("dataset", "name", "transcription", "speaker_id", "language")
 SEPARATOR = "|"
+
+# Thousands separators are read the English way, which is how the ASR wrote them; a lone comma
+# between digits is left alone rather than guessed at.
+NUMBER = re.compile(r"(?P<number>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)"
+                    r"(?P<ordinal>st|nd|rd|th)?\b", re.IGNORECASE)
+YEAR_RANGE = range(1000, 2501)          # numbers a speaker may read either as a year or a count
 
 
 def parse_args():
@@ -71,6 +85,8 @@ def parse_args():
 
 
 _pipeline = None
+_verbalize = False
+_aligner = None
 
 
 def _setup(config, verbose):
@@ -79,6 +95,7 @@ def _setup(config, verbose):
     global _pipeline
     torch.set_num_threads(1)
     _pipeline = Pipeline(config, verbose=verbose)
+    adopt(config, _pipeline)
 
 
 def _score(path):
@@ -118,7 +135,18 @@ def main():
     print_info("config", args.config if args.config.exists() else "built-in defaults")
     print_info("output", args.output)
 
-    order = [stage.verdict for stage in Pipeline(config).stages]
+    pipeline = Pipeline(config)
+    adopt(config, pipeline)                            # the dump helpers load() in this process
+    if _verbalize:
+        languages = {json.loads(path.read_text())["language"] for path in sidecars[:200]}
+        missing = verbalizable(languages)
+        print_info("verbalize numbers", f"on ({', '.join(sorted(languages))})" + (
+            f"{Colors.WARNING} — num2words has no {', '.join(missing)}, left as digits"
+            f"{Colors.ENDC}" if missing else "") + (
+            "" if _aligner else f"{Colors.WARNING} — no CTC stage, years read as counts"
+                                f"{Colors.ENDC}"))
+
+    order = [stage.verdict for stage in pipeline.stages]
     second_pass = config.source_rejection_enabled and QualityVerdict.MULTI_SPEAKER in order
     print_info("source pass", f"reject a speaker above {config.source_max_flag_rate:.0%} flagged "
                               f"clips (min {config.source_min_clips})" if second_pass else "off")
@@ -271,7 +299,83 @@ def load(path):
     """The clip's audio and its JSON sidecar, given the path to the sidecar."""
 
     audio, sample_rate = sf.read(path.with_suffix(".mp3"), dtype="float32")
-    return {"audio": audio, "sample_rate": sample_rate}, json.loads(path.read_text())
+    clip = {"audio": audio, "sample_rate": sample_rate}
+    meta = json.loads(path.read_text())
+    if _verbalize:
+        meta["text"] = verbalize(meta["text"], meta["language"], clip)
+    return clip, meta
+
+
+def adopt(config, pipeline):
+    """Take the verbalization settings, and the aligner that disambiguates years, from a pipeline.
+
+    The CTC stage already holds a loaded MMS_FA; borrowing it keeps the year decision free of a
+    second copy of the model, and leaves the decision unavailable exactly when the stage is off.
+    """
+
+    global _verbalize, _aligner
+    _verbalize = config.verbalize_numbers_enabled
+    _aligner = next((stage.metric for stage in pipeline.stages
+                     if stage.verdict is QualityVerdict.CTC_ALIGNMENT), None)
+
+
+def verbalize(text, language, audio=None):
+    """Digits spelled out as words, in the language the sidecar declares.
+
+    A number between 1000 and 2500 has two plausible readings — 1999 as "nineteen ninety-nine"
+    or as "one thousand, nine hundred and ninety-nine" — and only the audio settles which was
+    spoken, so every such number is rendered both ways and scored against the aligner over one
+    shared emission. Numbers are decided independently: n of them cost n + 1 candidates, not 2^n.
+
+    Falls back to the cardinal reading when there is no aligner, no audio, or no year-like
+    number, and leaves digits untouched in a language num2words cannot spell. Not to be trusted
+    for Japanese, whose year form is an era name (1999 -> 平成十一年) rather than a reading.
+    """
+
+    cardinal = render(text, language)
+    ambiguous = [index for index, match in enumerate(NUMBER.finditer(text))
+                 if not match.group("ordinal") and match.group("number").isdigit()
+                 and int(match.group("number")) in YEAR_RANGE]
+    if not ambiguous or audio is None or _aligner is None:
+        return cardinal
+
+    candidates = [cardinal] + [render(text, language, {index}) for index in ambiguous]
+    scores = _aligner.losses(audio, candidates)
+    as_years = {index for index, score in zip(ambiguous, scores[1:]) if score < scores[0]}
+    return render(text, language, as_years) if as_years else cardinal
+
+
+def render(text, language, as_years=()):
+    """The transcript with every number spelled out, reading the ones in as_years as years."""
+
+    position = itertools.count()
+
+    def spell(match):
+        index = next(position)
+        digits = match.group("number").replace(",", "")
+        value = float(digits) if "." in digits else int(digits)
+        if match.group("ordinal") and isinstance(value, int):
+            kind = "ordinal"
+        else:
+            kind = "year" if index in as_years else "cardinal"
+        try:
+            return num2words(value, lang=language, to=kind)
+        except (NotImplementedError, OverflowError, ValueError, TypeError):
+            return match.group(0)
+
+    return NUMBER.sub(spell, text)
+
+
+def verbalizable(languages):
+    """The subset of these languages num2words cannot spell."""
+
+    unsupported = set()
+    for language in languages:
+        try:
+            num2words(0, lang=language)
+        except Exception:
+            unsupported.add(language)
+    return sorted(unsupported)
 
 
 if __name__ == "__main__":

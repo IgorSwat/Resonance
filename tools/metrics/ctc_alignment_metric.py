@@ -45,20 +45,11 @@ class CtcAlignmentMetric(Metric):
 
         if not transcript:
             raise ValueError("CtcAlignmentMetric needs a transcript")
-        words = normalize(transcript)
-        tokens = [[DICTIONARY[c] for c in word if DICTIONARY.get(c, BLANK) != BLANK]
-                  for word in words]
-        tokens = [t for t in tokens if t]
-        if not tokens:
-            raise ValueError(f"No alignable characters in transcript: {transcript!r}")
+        tokens = tokenize(transcript)
 
         emission, duration = self._emission(audio)
         target = torch.tensor([[t for token in tokens for t in token]])
-        loss = torch.nn.functional.ctc_loss(
-            emission.transpose(0, 1), target,
-            torch.tensor([emission.shape[1]]), torch.tensor([target.shape[1]]),
-            blank=BLANK, reduction="sum", zero_infinity=True,
-        ).item() / target.shape[1]
+        loss = ctc_loss(emission, target)
 
         try:
             aligned, scores = torchaudio.functional.forced_align(emission, target, blank=BLANK)
@@ -112,6 +103,27 @@ class CtcAlignmentMetric(Metric):
             return False
         return not (missing_words(scores, bounds) or redundant_speech(scores, bounds))
 
+    def losses(self, audio, transcripts):
+        """
+        The CTC loss of each candidate transcript, over one shared emission.
+
+        For choosing between spellings of the same audio — a year read as "nineteen ninety-nine"
+        or as "one thousand, nine hundred and ninety-nine" — where only the target changes and
+        re-running the acoustic model for each candidate would be waste. A candidate with
+        nothing alignable in it scores infinity rather than raising.
+        """
+
+        emission, _ = self._emission(audio)
+        scored = []
+        for transcript in transcripts:
+            try:
+                tokens = tokenize(transcript)
+            except ValueError:
+                scored.append(float("inf"))
+                continue
+            scored.append(ctc_loss(emission, torch.tensor([[t for tok in tokens for t in tok]])))
+        return scored
+
     def _emission(self, audio):
         if self._model is None:
             self._model = BUNDLE.get_model(with_star=False).to(self.device).eval()
@@ -154,6 +166,31 @@ def normalize(text):
     text = text.lower().replace("’", "'")
     return [w for w in re.sub(r"\s+", " ", re.sub(r"[^a-z']", " ", text)).strip().split(" ")
             if any(c.isalpha() for c in w)]
+
+
+def tokenize(transcript):
+    """
+    MMS token ids per word, dropping characters the dictionary cannot represent.
+    """
+
+    tokens = [[DICTIONARY[c] for c in word if DICTIONARY.get(c, BLANK) != BLANK]
+              for word in normalize(transcript)]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        raise ValueError(f"No alignable characters in transcript: {transcript!r}")
+    return tokens
+
+
+def ctc_loss(emission, target):
+    """
+    Per-token CTC loss of one target against one emission.
+    """
+
+    return torch.nn.functional.ctc_loss(
+        emission.transpose(0, 1), target,
+        torch.tensor([emission.shape[1]]), torch.tensor([target.shape[1]]),
+        blank=BLANK, reduction="sum", zero_infinity=True,
+    ).item() / target.shape[1]
 
 
 def max_char_rate(word_spans, windows):
