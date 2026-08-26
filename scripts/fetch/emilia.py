@@ -1,0 +1,134 @@
+"""Download and unpack a range of Emilia batches from HuggingFace.
+
+    python scripts/fetch/emilia.py --lang EN --first 1 --last 3
+
+Each batch is one WebDataset tar under Emilia/<LANG>/ in amphion/Emilia-Dataset, and unpacks
+flat: an mp3 and a JSON sidecar per clip. A batch lands in <output-dir>/<lang>-b<id>/, the layout
+scripts/filter/emilia.py expects.
+
+The dataset is gated, so accept its terms on the model page and have a token in HF_TOKEN or
+~/.cache/huggingface/token. Batches are ~2 GB each; a partial download resumes rather than
+restarting, and an already-unpacked batch is skipped.
+"""
+
+import argparse
+import os
+import pathlib
+import sys
+import tarfile
+
+import requests
+from tqdm import tqdm
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+
+from scripts.__style__ import Colors, print_info, print_section, print_test_title
+
+LANGUAGES = ("EN", "ZH", "DE", "FR", "JA", "KO")
+BASE_URL = "https://huggingface.co/datasets/amphion/Emilia-Dataset/resolve/main/Emilia"
+OUTPUT_DIR = pathlib.Path("data/Emilia")
+CHUNK = 1 << 20
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--lang", default="EN", type=str.upper, choices=LANGUAGES)
+    parser.add_argument("--first", type=int, required=True, help="first batch id, inclusive")
+    parser.add_argument("--last", type=int, help="last batch id, inclusive (default: --first)")
+    parser.add_argument("--output-dir", type=pathlib.Path, default=OUTPUT_DIR)
+    parser.add_argument("--keep-archives", action="store_true",
+                        help="keep the .tar after unpacking instead of deleting it")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    last = args.first if args.last is None else args.last
+    if last < args.first:
+        raise SystemExit(f"--last {last} is before --first {args.first}")
+    ids = range(args.first, last + 1)
+
+    print_test_title(f"Fetching Emilia {args.lang}: batches {args.first}-{last}")
+    print_info("output", args.output_dir)
+    print_info("archives", "kept" if args.keep_archives else "deleted after unpacking")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    headers = {"Authorization": f"Bearer {token()}"}
+
+    clips = 0
+    for batch in tqdm(ids, desc="batches", unit="batch", position=0, leave=True):
+        name = f"{args.lang}-B{batch:06d}"
+        directory = args.output_dir / f"{args.lang.lower()}-b{batch:06d}"
+        print_section(name)
+        if directory.exists() and any(directory.glob("*.json")):
+            print_info("skipped", f"{directory} already holds "
+                                  f"{sum(1 for _ in directory.glob('*.json'))} clips")
+            continue
+
+        archive = args.output_dir / f"{name}.tar"
+        download(f"{BASE_URL}/{args.lang}/{name}.tar", archive, headers)
+        clips += extract(archive, directory)
+        if not args.keep_archives:
+            archive.unlink()
+
+    print_section("Done")
+    print_info("clips unpacked", clips)
+    print_info("root", args.output_dir)
+
+
+def token():
+    """The HuggingFace token, from the environment or the CLI's cache."""
+
+    for value in (os.environ.get("HF_TOKEN"), os.environ.get("HUGGINGFACE_TOKEN")):
+        if value:
+            return value.strip()
+    cached = pathlib.Path.home() / ".cache/huggingface/token"
+    if cached.exists():
+        return cached.read_text().strip()
+    raise SystemExit("No HuggingFace token; set HF_TOKEN or run `huggingface-cli login`")
+
+
+def download(url, archive, headers):
+    """Stream the tar to disk, resuming a half-finished one rather than starting over."""
+
+    partial = archive.with_suffix(".tar.part")
+    done = partial.stat().st_size if partial.exists() else 0
+    ranged = dict(headers, Range=f"bytes={done}-") if done else headers
+
+    with requests.get(url, headers=ranged, stream=True, timeout=60) as response:
+        if response.status_code in (401, 403):
+            raise SystemExit(f"{Colors.FAIL}{response.status_code} for {url}: accept the dataset "
+                             f"terms on huggingface.co and check your token{Colors.ENDC}")
+        if done and response.status_code == 200:      # server ignored the range: start over
+            done = 0
+        response.raise_for_status()
+        total = int(response.headers.get("content-length", 0)) + done
+
+        with open(partial, "ab" if done else "wb") as handle, tqdm(
+            total=total or None, initial=done, unit="B", unit_scale=True, unit_divisor=1024,
+            desc=f"download {archive.stem}", position=1, leave=False
+        ) as bar:
+            for chunk in response.iter_content(chunk_size=CHUNK):
+                handle.write(chunk)
+                bar.update(len(chunk))
+
+    partial.rename(archive)
+    return archive
+
+
+def extract(archive, directory):
+    """Unpack the tar flat into its batch directory; returns how many clips it held."""
+
+    directory.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive) as tar:
+        members = tar.getmembers()
+        for member in tqdm(members, desc=f"extract {directory.name}", unit="file",
+                           position=1, leave=False):
+            member.name = pathlib.Path(member.name).name       # flatten any PaxHeader nesting
+            tar.extract(member, directory, filter="data")
+    clips = sum(1 for _ in directory.glob("*.json"))
+    print_info("unpacked", f"{clips} clips -> {directory}")
+    return clips
+
+
+if __name__ == "__main__":
+    main()

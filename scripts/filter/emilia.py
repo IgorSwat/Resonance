@@ -4,8 +4,8 @@
 
 Emilia ships one directory per tar shard (data/Emilia/en-b000000/), each clip an mp3 beside a
 JSON sidecar holding its transcript, speaker and language. --batch restricts the run to a single
-shard; without it every batch directory under --root is filtered in one pass, which is rarely
-what you want — a shard is ~25k clips.
+shard; without it every batch under --root is filtered as one pool, which is what the phase-1
+rules want — a source duplicated across two shards is only visible when both are in scope.
 
 **Phase 1, preprocessing** works from the sidecars alone, no audio decoded:
 
@@ -91,10 +91,12 @@ def main():
     args = parse_args()
     config = QualityConfig.from_yaml(args.config) if args.config.exists() else QualityConfig()
     sidecars = discover(args)
+    shards = sorted({path.parent.name for path in sidecars})
 
     print_test_title(f"Filtering {DATASET}: {len(sidecars)} clips")
     print_info("root", args.root)
-    print_info("batches", args.batch or "all")
+    print_info("batches", args.batch or
+               f"all {len(shards)}: {', '.join(shards)}" if not args.batch else args.batch)
     print_info("config", args.config if args.config.exists() else "built-in defaults")
     print_info("output", args.output)
     print_info("workers", args.workers)
@@ -115,7 +117,11 @@ def main():
 
 
 def discover(args):
-    """Every clip's sidecar, from the named batch directory or from all of them."""
+    """Every clip's sidecar, from the named batch directory or from all of them at once.
+
+    Speaker IDs are unique across shards — a batch's speakers are split over ten tars by index
+    modulo ten — so pooling shards needs no renaming and lets phase 1 see cross-shard duplicates.
+    """
 
     if args.batch:
         directories = [args.root / args.batch]
@@ -136,7 +142,7 @@ def discover(args):
 
 
 def preprocess(sidecars, config, args):
-    """The clips worth scoring: the whole batch, minus every duplicated source.
+    """The clips worth scoring: every shard in scope, minus every duplicated source.
 
     --limit is applied here, after deduplication, so a sampled run still drops the same sources a
     full run would: both phase-1 rules judge a source by all of its clips, not by the sample.
@@ -259,7 +265,9 @@ def verbalize_status(sidecars, config):
     config rather than from whether it has been picked up yet.
     """
 
-    languages = {json.loads(path.read_text())["language"] for path in sidecars[:200]}
+    # strided rather than the first 200, which would all come from the same shard
+    sample = sidecars[::max(1, len(sidecars) // 200)][:200]
+    languages = {json.loads(path.read_text())["language"] for path in sample}
     unspellable = sorted(language for language in languages if not spellable(language))
     status = f"on ({', '.join(sorted(languages))})"
     if unspellable:

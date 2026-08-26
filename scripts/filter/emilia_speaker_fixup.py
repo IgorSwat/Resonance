@@ -9,7 +9,9 @@ two recordings gets two unrelated IDs (knowledge/emilia.md §1). That inflates t
 distorts the per-speaker prosody reference in scripts/select/emilia.py, and leaks a voice across
 a train/validation split.
 
-Reads a CSV from scripts/filter/emilia.py, embeds a few clips per source with
+Reads a CSV from scripts/filter/emilia.py — one shard or several, clustered as a single pool,
+since the same person recorded in two shards is exactly the case worth catching — embeds a few
+clips per source with
 pyannote/wespeaker-voxceleb-resnet34-LM, clusters the sources the model calls one person, and
 rewrites speaker_id to the lowest ID of each cluster. No other column changes.
 
@@ -79,6 +81,8 @@ def main():
                             f"{args.linkage} linkage")
 
     paths = locate(args.root, {row["name"] for row in rows})
+    shards = sorted({path.parent.name for path in paths.values()})
+    print_info("shards", f"{len(shards)}: {', '.join(shards)}")
     unlocatable = sum(1 for names in clips.values() if not any(n in paths for n in names))
     if unlocatable:
         print(f"{Colors.WARNING}  {unlocatable} sources have no audio under {args.root}; "
