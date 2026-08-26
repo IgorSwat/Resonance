@@ -54,6 +54,14 @@ source_rejection_enabled: true
 source_max_flag_rate: 0.5        # share of a speaker's scored clips the stage may reject
 source_min_clips: 3              # speakers with fewer scored clips are left alone
 
+# Phase 1 — preprocessing, from the sidecars alone.
+#
+# Emilia re-releases the same recording under several speaker IDs (knowledge/emilia.md §6). Two
+# sources count as the same recording when more than duplicate_max_overlap of the smaller one's
+# transcripts also appear in the other. The larger source is kept, ties going to the lower ID.
+duplicate_sources_enabled: true
+duplicate_max_overlap: 0.33
+
 # Spell digits out as words in the clip's own language (num2words) before the cascade reads the transcript.
 verbalize_numbers_enabled: true
 
