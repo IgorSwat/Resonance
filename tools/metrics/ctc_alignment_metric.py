@@ -63,9 +63,11 @@ class CtcAlignmentMetric(Metric):
         try:
             aligned, scores = torchaudio.functional.forced_align(emission, target, blank=BLANK)
         except RuntimeError:
-            # the transcript needs more frames than the audio has: missing words in the extreme
-            return {"loss": loss, "maxrate": float(BUNDLE.sample_rate), "gap_speech": 0.0,
-                    "trail_speech": 0.0}
+            # The transcript needs more frames than the audio has: missing words in the extreme.
+            # ctc_loss(zero_infinity=True) scores that 0.0 — the best value there is — so the
+            # loss computed above must not be reported for this path.
+            return {"loss": float("inf"), "maxrate": float(BUNDLE.sample_rate),
+                    "gap_speech": 0.0, "trail_speech": 0.0}
 
         spans = torchaudio.functional.merge_tokens(aligned[0], scores[0].exp())
         step = duration / emission.shape[1]
@@ -100,7 +102,7 @@ class CtcAlignmentMetric(Metric):
         if rbound:
             unknown = set(rbound) - set(bounds)
             if unknown:
-                raise KeyError(f"Unknown alignment scores: {sorted(unknown)}; expected {list(FIELDS)}")
+                raise KeyError(f"Unknown alignment scores: {sorted(unknown)}; expected {list(bounds)}")
             bounds.update(rbound)
 
         try:
@@ -127,10 +129,14 @@ class CtcAlignmentMetric(Metric):
 
 def missing_words(scores, bounds):
     """
-    Both terms are required: loss alone ranks spoken numerals, not defects.
+    Two ways in. Both terms are required for the ordinary case, since loss alone ranks spoken
+    numerals rather than defects. But maxrate cannot corroborate anything for a transcript
+    shorter than the windows it averages over — max_char_rate has no window to fill and returns
+    0.0 — so a loss beyond max_loss counts as a defect on its own.
     """
 
-    return scores["loss"] > bounds["loss"] and scores["maxrate"] > bounds["maxrate"]
+    return (scores["loss"] > bounds["max_loss"]
+            or (scores["loss"] > bounds["loss"] and scores["maxrate"] > bounds["maxrate"]))
 
 
 def redundant_speech(scores, bounds):
@@ -171,4 +177,5 @@ def speech_mass(speech, step, start, end):
     return float(speech[lo:hi].sum() * step) if hi > lo else 0.0
 
 
-DEFAULT_RBOUND = {"loss": 1.0, "maxrate": 30.0, "gap_speech": 0.06, "trail_speech": 0.05}
+DEFAULT_RBOUND = {"loss": 1.0, "max_loss": 5.0, "maxrate": 30.0,
+                  "gap_speech": 0.06, "trail_speech": 0.05}

@@ -59,6 +59,7 @@ source_min_clips: 3              # speakers with fewer scored clips are left alo
 ctc_enabled: true                # false skips the stage entirely, for untranscribed audio
 ctc_max:
   loss: 1.0
+  max_loss: 4.0                  # a loss this high is a defect on its own, whatever maxrate says
   maxrate: 30.0
   gap_speech: 0.06
   trail_speech: 0.05
