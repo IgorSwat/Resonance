@@ -9,6 +9,7 @@ from tools.prosody.constants import (
     DEFAULT_FLOOR,
     DEFAULT_SPEAKER_CAP,
     EXPR_EDGES,
+    PITCH_EDGE,
     RATE_BINS,
     SLOPE_LEVEL,
 )
@@ -146,7 +147,7 @@ def _entropy(counts, total):
     return math.log2(total) - sum(n * math.log2(n) for n in counts.values()) / total
 
 
-def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0):
+def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, high_bounds=None):
     """
     Select rows under a per-speaker floor and ceiling, taking as much data as stays flat.
 
@@ -157,6 +158,11 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0):
     histogram is short.
 
     Unlike select_diverse there is no budget: the draw stops when nothing flattens further.
+
+    `high_bounds` is an optional (floor, ceiling) applied instead to speakers whose reference
+    pitch is above PITCH_EDGE, which oversamples high voices. Only its floor is a guarantee:
+    reference pitch is not one of the cell axes, so a raised ceiling merely permits growth
+    the entropy gate may still refuse.
     """
 
     rng = random.Random(seed)
@@ -166,11 +172,16 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0):
     by_speaker = collections.defaultdict(list)
     for row in rows:
         by_speaker[row["speaker"]].append(row)
+    bounds = {
+        speaker: high_bounds if high_bounds and clips[0]["ref_hz"] > PITCH_EDGE else (floor, ceiling)
+        for speaker, clips in by_speaker.items()
+    }
     rarity = collections.Counter(row["cell"] for row in rows)
 
     taken, counts, selected = collections.Counter(), collections.Counter(), []
     for speaker, clips in sorted(by_speaker.items()):
-        if len(clips) < floor:
+        speaker_floor = bounds[speaker][0]
+        if len(clips) < speaker_floor:
             continue
         buckets = collections.defaultdict(list)
         for row in clips:
@@ -178,9 +189,9 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0):
         for bucket in buckets.values():
             rng.shuffle(bucket)
         order = sorted(buckets, key=lambda cell: rarity[cell])
-        while taken[speaker] < floor:
+        while taken[speaker] < speaker_floor:
             for cell in order:
-                if buckets[cell] and taken[speaker] < floor:
+                if buckets[cell] and taken[speaker] < speaker_floor:
                     row = buckets[cell].pop()
                     selected.append(row)
                     counts[row["cell"]] += 1
@@ -208,7 +219,7 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0):
         row = None
         while available[cell] and row is None:
             candidate = available[cell].pop()
-            if taken[candidate["speaker"]] < ceiling:
+            if taken[candidate["speaker"]] < bounds[candidate["speaker"]][1]:
                 row = candidate
         if row is None:
             continue

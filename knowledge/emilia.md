@@ -268,7 +268,39 @@ that is not a speaker-verification question. Deduplicate first.
 
 ---
 
-## 7. Practical notes
+## 7. Pitch skew — male voices outnumber female ~3:1
+
+Speaker reference pitch (`tools/prosody/normalize.speaker_reference`) over 250 random
+`en-b000000` speakers holding >=7 clips, 8 clips sampled each:
+
+```
+p5 99.7   p25 120.5   p50 132.1   p75 158.5   p95 211.5 Hz
+above 165 Hz:  23.6% of speakers, 19.0% of clips
+```
+
+This matters because `select_bounded`'s floor phase gives every admitted speaker exactly
+`floor` clips regardless of cells, and reference pitch is constant within a speaker. So no cell
+axis can correct the skew — only per-speaker bounds can, which is what `PITCH_EDGE` /
+`--high-min-per-speaker` do.
+
+The gain saturates near 30%: raising the high floor costs high-pitch speakers, because most
+have few clips (median 20, vs 32 for low-pitch). Measured, with the low floor at 7:
+
+```
+high floor  7 -> 59/59 high speakers kept, clip share 0.236
+high floor 12 -> 41/59, 0.269
+high floor 20 -> 31/59, 0.317
+```
+
+Past that the lever is admission — dropping low-pitch speakers — not oversampling.
+
+Two confounds: 150-180 Hz mixes low female and high male voices, and residual octave doubling
+puts a doubled male reference straight into the high band. `PITCH_EDGE` is deliberately an
+absolute constant; a percentile of the pool's own pitch reproduces the skew it is meant to fix.
+
+---
+
+## 8. Practical notes
 
 - `pyannote/segmentation-3.0` and `pyannote/speaker-diarization-3.1` are gated (403 until the
   licence is accepted); `pyannote/wespeaker-voxceleb-resnet34-LM` is **not**.

@@ -10,6 +10,9 @@ size is decided by the pool rather than fixed up front. Emilia speakers are per-
 diarisation labels, not people, so a speaker here is one voice in one recording and most of
 them carry only a handful of clips; the comparison the script prints is what tells you whether
 the selection actually moved anything.
+
+Male voices outnumber female ones roughly 3:1 here, so speakers above PITCH_EDGE get their own
+--high-min-per-speaker / --high-max-per-speaker instead, contributing more clips each.
 """
 
 import argparse
@@ -24,7 +27,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from scripts.__style__ import Colors, print_info, print_test_title
 from scripts.select.libritts import capped_random, report, score
-from tools.prosody.constants import DEFAULT_CEILING, DEFAULT_FLOOR
+from tools.prosody.constants import DEFAULT_CEILING, DEFAULT_FLOOR, HIGH_FLOOR, PITCH_EDGE
 from tools.prosody.selection import select_bounded
 
 DATASET = "Emilia"
@@ -49,6 +52,10 @@ def parse_args():
                         help="clips every kept speaker contributes; speakers with fewer are dropped")
     parser.add_argument("--max-per-speaker", type=int, default=DEFAULT_CEILING,
                         help="most a speaker may contribute, reached only by flattening the histogram")
+    parser.add_argument("--high-min-per-speaker", type=int, default=HIGH_FLOOR,
+                        help=f"as --min-per-speaker, for speakers above {PITCH_EDGE:.0f} Hz")
+    parser.add_argument("--high-max-per-speaker", type=int, default=DEFAULT_CEILING,
+                        help=f"as --max-per-speaker, for speakers above {PITCH_EDGE:.0f} Hz")
     parser.add_argument("--limit", type=int, help="score only N random rows of the input pool")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dump-accepted", action="store_true",
@@ -66,7 +73,9 @@ def main():
     print_test_title(f"Selecting from {DATASET}: {len(pool)} filtered clips")
     print_info("input", args.input)
     print_info("output", args.output)
-    print_info("bounds", f"{args.min_per_speaker}-{args.max_per_speaker} clips per speaker")
+    print_info("bounds", f"{args.min_per_speaker}-{args.max_per_speaker} clips per speaker  "
+                         f"({args.high_min_per_speaker}-{args.high_max_per_speaker} "
+                         f"above {PITCH_EDGE:.0f} Hz)")
 
     paths = locate(args.root, {name for name, _, _ in pool})
     missing = [name for name, _, _ in pool if name not in paths]
@@ -80,15 +89,24 @@ def main():
     if not rows:
         raise SystemExit("Nothing to select from")
 
-    selected = select_bounded(rows, args.min_per_speaker, args.max_per_speaker, seed=args.seed)
+    selected = select_bounded(rows, args.min_per_speaker, args.max_per_speaker, seed=args.seed,
+                              high_bounds=(args.high_min_per_speaker, args.high_max_per_speaker))
     if not selected:
         raise SystemExit(f"No speaker has {args.min_per_speaker} usable clips")
+    print_info("high-voiced", f"{high_share(rows):.1%} of the pool "
+                              f"-> {high_share(selected):.1%} of the selection")
     write(args.output, selected, languages)
 
     baseline = capped_random(rows, len(selected), args.max_per_speaker, args.seed)
     report(rows, selected, baseline, args.output)
     if args.dump_accepted:
         dump_accepted(selected, args.seed)
+
+
+def high_share(rows):
+    """Fraction of clips spoken above PITCH_EDGE — the imbalance the high bounds correct."""
+
+    return sum(row["ref_hz"] > PITCH_EDGE for row in rows) / len(rows)
 
 
 def read_pool(path):

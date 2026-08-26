@@ -28,3 +28,8 @@ SLOPE_LEVEL = 5.0               # |st/s| below this counts as level
 DEFAULT_SPEAKER_CAP = 2
 DEFAULT_FLOOR = 7               # a speaker below this contributes nothing
 DEFAULT_CEILING = 20            # and grows toward this only while it flattens the histogram
+
+# absolute Hz, never a pool percentile: a pool is uniform over its own quantiles, so
+# quantile edges would reproduce the corpus's pitch skew instead of correcting it
+PITCH_EDGE = 165.0
+HIGH_FLOOR = 12                 # floor for speakers above the edge, oversampling high voices
