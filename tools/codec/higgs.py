@@ -1,9 +1,39 @@
 import numpy as np
 import torch
+import torchaudio
 from transformers import AutoFeatureExtractor, HiggsAudioV2TokenizerModel
 
 MODEL = "eustlb/higgs-audio-v2-tokenizer"
 CODEBOOKS = 8
+
+# librosa's kaiser_best, as in tools/metrics/multi_speaker.py — the default kernel leaves
+# aliasing near Nyquist that a cheap decimation folds straight back into the speech band
+RESAMPLE = {
+    "lowpass_filter_width": 64,
+    "rolloff": 0.9475937167399596,
+    "resampling_method": "sinc_interp_kaiser",
+    "beta": 14.769656459379392,
+}
+
+
+def to_codec_rate(audio, rate):
+    """
+    Resample an audio dict to `rate`, so a source at another sample rate can be encoded.
+
+    Downsampling drops everything above the new Nyquist, which the codec could not represent
+    at `rate` anyway; passing the samples through unconverted would instead reinterpret the
+    timebase and stretch the clip. Emilia is 24 kHz throughout the batches measured so far, so
+    anything this converts is worth tracing upstream rather than accepting silently.
+    """
+
+    if audio["sample_rate"] == rate:
+        return audio
+    y = np.asarray(audio["audio"], dtype=np.float32)
+    waveform = torch.from_numpy(y.T if y.ndim > 1 else y)
+    resampled = torchaudio.functional.resample(
+        waveform, audio["sample_rate"], rate, **RESAMPLE
+    ).numpy()
+    return audio | {"audio": resampled.T if y.ndim > 1 else resampled, "sample_rate": rate}
 
 
 class HiggsCodec:

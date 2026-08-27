@@ -3,9 +3,10 @@
     python scripts/finalize/emilia.py --input data/processed/Emilia/emilia_selected.csv
 
 Takes the output of scripts/select/emilia.py and materialises the subset: the mp3 next to the
-tokens, one file each per clip. Emilia's mp3s are already 24 kHz, what the codec wants, so they
-are copied rather than re-encoded. Tokens are stored int16 as OmniVoice does — the codebook is
-1024 wide, so the narrower type halves the files without losing anything.
+tokens, one file each per clip. Emilia's mp3s are almost always already 24 kHz, what the codec
+wants, so they are copied rather than re-encoded; the rare clip at another rate is resampled for
+the codec only. Tokens are stored int16 as OmniVoice does — the codebook is 1024 wide, so the
+narrower type halves the files without losing anything.
 
 Clips live in one directory per batch, and every batch under --root is searched; point --root at
 a single batch directory to finalize only that one.
@@ -25,7 +26,7 @@ from scripts.__style__ import Colors, print_info, print_test_title
 from scripts.finalize.libritts import report
 from scripts.select.emilia import DATASET, ROOT, locate, read_pool
 from scripts.select.libritts import load
-from tools.codec.higgs import HiggsCodec
+from tools.codec.higgs import HiggsCodec, to_codec_rate
 
 PROCESSED = pathlib.Path("data/processed/Emilia")
 
@@ -66,7 +67,7 @@ def main():
             continue
         try:
             shutil.copy2(paths[name], args.audio_dir / f"{name}.mp3")
-            tokens = codec.encode(load(paths[name]))
+            tokens = codec.encode(to_codec_rate(load(paths[name]), codec.sampling_rate))
             np.save(args.codec_dir / f"{name}.npy", tokens.cpu().numpy().astype(np.int16))
         except Exception as error:
             print(f"{Colors.FAIL}{name}: {error}{Colors.ENDC}")
