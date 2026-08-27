@@ -278,13 +278,16 @@ p5 99.7   p25 120.5   p50 132.1   p75 158.5   p95 211.5 Hz
 above 165 Hz:  23.6% of speakers, 19.0% of clips
 ```
 
-This matters because `select_bounded`'s floor phase gives every admitted speaker exactly
-`floor` clips regardless of cells, and reference pitch is constant within a speaker. So no cell
+This matters because `select_bounded`'s target phase gives every admitted speaker its target
+number of clips regardless of cells, and reference pitch is constant within a speaker. So no cell
 axis can correct the skew — only per-speaker bounds can, which is what `PITCH_EDGE` /
-`--high-min-per-speaker` do.
+`--high-target-per-speaker` do.
 
-The gain saturates near 30%: raising the high floor costs high-pitch speakers, because most
-have few clips (median 20, vs 32 for low-pitch). Measured, with the low floor at 7:
+`--high-target-per-speaker` is a target, not a floor: it is clamped to what the speaker holds,
+so a high-pitch speaker below it contributes everything they have and only `--min-per-speaker`
+decides admission. The measurements below predate that and were taken with the high bound as a
+floor, when raising it dropped high-pitch speakers, most of whom have few clips (median 20, vs
+32 for low-pitch). With the low floor at 7:
 
 ```
 high floor  7 -> 59/59 high speakers kept, clip share 0.236

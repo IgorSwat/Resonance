@@ -1,18 +1,19 @@
 """Select a prosodically varied subset of the filtered Emilia CSV.
 
-    python scripts/select/emilia.py --min-per-speaker 7 --max-per-speaker 20
+    python scripts/select/emilia.py --min-per-speaker 3 --target-per-speaker 7
 
 Takes the output of scripts/filter/emilia.py as the input pool, scores every clip with
 tools/prosody, and picks clips whose prosody-cell histogram is as flat as the pool allows.
-Every speaker with enough clips contributes --min-per-speaker of them, then grows toward
---max-per-speaker for as long as each further clip still flattens the histogram, so the subset
-size is decided by the pool rather than fixed up front. Emilia speakers are per-source
-diarisation labels, not people, so a speaker here is one voice in one recording and most of
-them carry only a handful of clips; the comparison the script prints is what tells you whether
-the selection actually moved anything.
+Every speaker holding --min-per-speaker clips is admitted and contributes
+--target-per-speaker of them, or all they have if fewer, then grows toward --max-per-speaker for
+as long as each further clip still flattens the histogram, so the subset size is decided by the
+pool rather than fixed up front. Emilia speakers are per-source diarisation labels, not people,
+so a speaker here is one voice in one recording and most of them carry only a handful of clips;
+the comparison the script prints is what tells you whether the selection actually moved
+anything.
 
 Male voices outnumber female ones roughly 3:1 here, so speakers above PITCH_EDGE get their own
---high-min-per-speaker / --high-max-per-speaker instead, contributing more clips each.
+--high-target-per-speaker / --high-max-per-speaker instead, contributing more clips each.
 """
 
 import argparse
@@ -27,7 +28,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from scripts.__style__ import Colors, print_info, print_test_title
 from scripts.select.libritts import capped_random, report, score
-from tools.prosody.constants import DEFAULT_CEILING, DEFAULT_FLOOR, HIGH_FLOOR, PITCH_EDGE
+from tools.prosody.constants import DEFAULT_CEILING, DEFAULT_FLOOR, HIGH_TARGET, PITCH_EDGE
 from tools.prosody.selection import select_bounded
 
 DATASET = "Emilia"
@@ -49,11 +50,14 @@ def parse_args():
                         default=pathlib.Path("emilia_selected.csv"))
     parser.add_argument("--root", type=pathlib.Path, default=ROOT)
     parser.add_argument("--min-per-speaker", type=int, default=DEFAULT_FLOOR,
-                        help="clips every kept speaker contributes; speakers with fewer are dropped")
+                        help="clips a speaker must have to be kept at all")
+    parser.add_argument("--target-per-speaker", type=int, default=DEFAULT_FLOOR,
+                        help="clips a kept speaker contributes, or all they have if fewer")
     parser.add_argument("--max-per-speaker", type=int, default=DEFAULT_CEILING,
                         help="most a speaker may contribute, reached only by flattening the histogram")
-    parser.add_argument("--high-min-per-speaker", type=int, default=HIGH_FLOOR,
-                        help=f"as --min-per-speaker, for speakers above {PITCH_EDGE:.0f} Hz")
+    parser.add_argument("--high-target-per-speaker", type=int, default=HIGH_TARGET,
+                        help=f"clips a speaker above {PITCH_EDGE:.0f} Hz contributes, "
+                             "or all they have if fewer")
     parser.add_argument("--high-max-per-speaker", type=int, default=DEFAULT_CEILING,
                         help=f"as --max-per-speaker, for speakers above {PITCH_EDGE:.0f} Hz")
     parser.add_argument("--limit", type=int, help="score only N random rows of the input pool")
@@ -73,9 +77,10 @@ def main():
     print_test_title(f"Selecting from {DATASET}: {len(pool)} filtered clips")
     print_info("input", args.input)
     print_info("output", args.output)
-    print_info("bounds", f"{args.min_per_speaker}-{args.max_per_speaker} clips per speaker  "
-                         f"({args.high_min_per_speaker}-{args.high_max_per_speaker} "
+    print_info("bounds", f"{args.target_per_speaker}-{args.max_per_speaker} clips per speaker  "
+                         f"({args.high_target_per_speaker}-{args.high_max_per_speaker} "
                          f"above {PITCH_EDGE:.0f} Hz)")
+    print_info("admitted", f"speakers with at least {args.min_per_speaker} clips")
 
     paths = locate(args.root, {name for name, _, _ in pool})
     missing = [name for name, _, _ in pool if name not in paths]
@@ -90,7 +95,8 @@ def main():
         raise SystemExit("Nothing to select from")
 
     selected = select_bounded(rows, args.min_per_speaker, args.max_per_speaker, seed=args.seed,
-                              high_bounds=(args.high_min_per_speaker, args.high_max_per_speaker))
+                              target=args.target_per_speaker,
+                              high_bounds=(args.high_target_per_speaker, args.high_max_per_speaker))
     if not selected:
         raise SystemExit(f"No speaker has {args.min_per_speaker} usable clips")
     print_info("high-voiced", f"{high_share(rows):.1%} of the pool "

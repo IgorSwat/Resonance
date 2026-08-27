@@ -147,22 +147,24 @@ def _entropy(counts, total):
     return math.log2(total) - sum(n * math.log2(n) for n in counts.values()) / total
 
 
-def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, high_bounds=None):
+def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, target=None,
+                   high_bounds=None):
     """
     Select rows under a per-speaker floor and ceiling, taking as much data as stays flat.
 
-    Every speaker holding at least `floor` rows contributes exactly that many, spread over
-    their rarest cells; speakers below the floor are dropped. Beyond the floor, rows are drawn
-    from the thinnest cell for as long as each one strictly raises the cell histogram's
-    entropy, so a speaker approaches `ceiling` only while their rows still land where the
-    histogram is short.
+    `floor` decides admission: speakers holding fewer rows are dropped. Every admitted speaker
+    then contributes `target` rows (all of theirs when they hold fewer), spread over their
+    rarest cells; `target` defaults to `floor`. Beyond that, rows are drawn from the thinnest
+    cell for as long as each one strictly raises the cell histogram's entropy, so a speaker
+    approaches `ceiling` only while their rows still land where the histogram is short.
 
     Unlike select_diverse there is no budget: the draw stops when nothing flattens further.
 
-    `high_bounds` is an optional (floor, ceiling) applied instead to speakers whose reference
-    pitch is above PITCH_EDGE, which oversamples high voices. Only its floor is a guarantee:
-    reference pitch is not one of the cell axes, so a raised ceiling merely permits growth
-    the entropy gate may still refuse.
+    `high_bounds` is an optional (target, ceiling) applied instead to speakers whose reference
+    pitch is above PITCH_EDGE, which oversamples high voices. `floor` still decides admission,
+    so raising either target never costs a speaker. A ceiling is only a permission: reference
+    pitch is not one of the cell axes, so growth past the target is whatever the entropy gate
+    allows.
     """
 
     rng = random.Random(seed)
@@ -172,26 +174,28 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, h
     by_speaker = collections.defaultdict(list)
     for row in rows:
         by_speaker[row["speaker"]].append(row)
-    bounds = {
-        speaker: high_bounds if high_bounds and clips[0]["ref_hz"] > PITCH_EDGE else (floor, ceiling)
-        for speaker, clips in by_speaker.items()
-    }
+    bounds = {}
+    for speaker, clips in by_speaker.items():
+        speaker_target, speaker_ceiling = (
+            high_bounds if high_bounds and clips[0]["ref_hz"] > PITCH_EDGE
+            else (floor if target is None else target, ceiling))
+        bounds[speaker] = (min(speaker_target, len(clips)), speaker_ceiling)
     rarity = collections.Counter(row["cell"] for row in rows)
 
     taken, counts, selected = collections.Counter(), collections.Counter(), []
     for speaker, clips in sorted(by_speaker.items()):
-        speaker_floor = bounds[speaker][0]
-        if len(clips) < speaker_floor:
+        if len(clips) < floor:
             continue
+        speaker_take = bounds[speaker][0]
         buckets = collections.defaultdict(list)
         for row in clips:
             buckets[row["cell"]].append(row)
         for bucket in buckets.values():
             rng.shuffle(bucket)
         order = sorted(buckets, key=lambda cell: rarity[cell])
-        while taken[speaker] < speaker_floor:
+        while taken[speaker] < speaker_take:
             for cell in order:
-                if buckets[cell] and taken[speaker] < speaker_floor:
+                if buckets[cell] and taken[speaker] < speaker_take:
                     row = buckets[cell].pop()
                     selected.append(row)
                     counts[row["cell"]] += 1
