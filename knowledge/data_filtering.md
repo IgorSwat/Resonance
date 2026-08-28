@@ -319,6 +319,12 @@ and hop are defined in *seconds*, so it is sample-rate agnostic: no resampling n
 - 275× realtime sequential, **372× realtime batched (batch 8; 32 gives nothing more)**
 - ~10 ms fixed overhead + ~2.4 ms per audio-second → short clips are overhead-bound, batch them
 - **MPS gives no speedup** (21.7 vs 21.2 ms) — model too small; stay on CPU, parallelize processes
+- **MPS is also wrong, not just slow.** Measured on 434 Emilia batch-4 clips, MPS scores sit
+  below the CPU reference on every dimension — mean CPU−MPS of 0.64 MOS, 0.45 loudness,
+  0.32 coloration, 0.29 noisiness, 0.21 discontinuity, up to 1.69 MOS on a single clip. The
+  same clips pass `quality_filtering_emilia.yaml`'s `nisqa_min` 100% on CPU and 57% on MPS,
+  so a re-check run on a Mac silently disagrees with the CUDA/CPU run that filtered the data.
+  `NisqaMetric` picks MPS by default when no device is given — set `nisqa_device: cpu` there.
 - ⇒ 1,000 h ≈ 3 compute-hours single-process, ~25 min across 8 workers. At this speed audio
   *decoding* is a comparable cost, especially for MP3 corpora.
 

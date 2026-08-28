@@ -61,7 +61,7 @@ source_min_clips: 3              # speakers with fewer scored clips are left alo
 # sources count as the same recording when more than duplicate_max_overlap of the smaller one's
 # transcripts also appear in the other. The larger source is kept, ties going to the lower ID.
 duplicate_sources_enabled: true
-duplicate_max_overlap: 0.33
+duplicate_max_overlap: 0.30
 
 # Spell digits out as words in the clip's own language (num2words) before the cascade reads the transcript.
 verbalize_numbers_enabled: true
@@ -71,7 +71,7 @@ verbalize_numbers_enabled: true
 ctc_enabled: true                # false skips the stage entirely, for untranscribed audio
 ctc_max:
   loss: 1.0
-  max_loss: 4.0                  # a loss this high is a defect on its own, whatever maxrate says
+  max_loss: 3.0                  # a loss this high is a defect on its own, whatever maxrate says
   maxrate: 30.0
   gap_speech: 0.06
   trail_speech: 0.05
