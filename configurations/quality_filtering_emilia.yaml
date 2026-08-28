@@ -52,7 +52,7 @@ multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
 # set however the stage is tuned; judging the whole speaker catches those. At 0.5 this dropped
 # 8% of a batch on top of the per-clip stage and cost none of the labelled clean clips.
 source_rejection_enabled: true
-source_max_flag_rate: 0.5        # share of a speaker's scored clips the stage may reject
+source_max_flag_rate: 0.33        # share of a speaker's scored clips the stage may reject
 source_min_clips: 3              # speakers with fewer scored clips are left alone
 
 # Phase 1 — preprocessing, from the sidecars alone.

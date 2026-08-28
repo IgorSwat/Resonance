@@ -145,6 +145,19 @@ Recorded so these are not re-attempted.
 | Shorter windows for the above | Monotonically worse: 0.75 s → 0.715, 1.0 → 0.730, 1.5 → 0.749, 2.0 → 0.801. Embedding quality degrades faster than short intrusions are recovered |
 | Fitting a classifier on the two scores | LOO-CV 0.766, worse than the unfitted product 0.818. Do not fit on ~40 points |
 | F0 shift across the clip as corroboration | Unreliable in both directions — disagreed with the human on 4 of 12 clips. It tracks intonation, not identity |
+| `pyannote/speaker-diarization-3.1` (full pipeline) | **1 of 7** ear-confirmed clips. It is segmentation-3.0 + embedding clustering, and segmentation emits no second speaker to cluster (hard `second` 0.000 s on all 7; soft peak posterior 0.03-0.05 on four). Grid over `min_cluster_size` {1,2,4,12} x `threshold` {0.5,0.6,0.7046} tops out at 2/7 — clustering cannot recover what segmentation never proposed |
+
+**Exception — the anchorless, duration-normalized variant does work at the tail.**
+`tools/metrics/speaker_drift.py` scores the *minimum pairwise* cosine between ECAPA windows (no
+speaker anchor) and ranks by z within a duration band. On 500 random EN-B000007 clips that had
+already passed `MultiSpeakerMetric`, the 10 lowest-z clips were labelled by ear: **7 confirmed
+multi-speaker**, p < 0.02 against even a 1/3 base rate. Two properties are load-bearing and were
+absent from the x-vector attempt above: no anchor to average away the intrusion, and the
+duration control — raw similarity correlates -0.574 with clip length (more window pairs, lower
+minimum), so an unnormalized threshold is mostly a long-clip filter.
+
+Measured only as precision at the extreme tail. Recall is unknown, and the 0.16 default bound is
+a p5 cut, not a calibrated gate — the score is unimodal, so there is no valley to put it in.
 
 ---
 
