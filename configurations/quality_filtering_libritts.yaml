@@ -13,6 +13,10 @@ max_duration: 30.0
 # it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
 bandwidth_min_frac: 0.85
 bandwidth_band_hz: 1000.0        # drop to 500.0 when per-file cutoff precision matters
+bandwidth_cliff_db: 20.0         # a band counts as speech-bearing only if it does not
+                                 # cliff more than this against the band below it; dynamics
+                                 # alone are fooled by codec noise above a lossy encoder's
+                                 # lowpass. null restores the dynamics-only walk.
 
 # Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
 clipping_max_ratio: 0.0001

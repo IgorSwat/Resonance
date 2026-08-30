@@ -13,6 +13,13 @@ class EffectiveBandwidthMetric(Metric):
     a dead band whose level never moves regardless of what is said. Comparing each band's
     temporal dynamic range against the speech band's makes the score independent of the
     file's noise floor and of the sample rate. See knowledge/data_filtering.md §1.1.
+
+    Dynamics alone are not enough on lossy audio: a codec's sparse noise lines above its own
+    lowpass fluctuate as much as speech does, so a 10 kHz mp3 would read as fullband. A band
+    therefore also has to carry energy comparable to the band below it — a cliff steeper than
+    cliff_db between successive bands is a codec's lowpass, not the speaker's voice, whose
+    spectrum falls by a few dB per band. Comparing successive bands rather than the speech
+    band keeps the test independent of natural spectral tilt.
     """
 
     def __init__(
@@ -25,6 +32,7 @@ class EffectiveBandwidthMetric(Metric):
         speech_band=(1000.0, 4000.0),
         loud_percentile=40,
         min_duration=2.0,
+        cliff_db=20.0,
     ):
         self.nfft = nfft
         self.hop = hop
@@ -34,6 +42,7 @@ class EffectiveBandwidthMetric(Metric):
         self.speech_band = speech_band
         self.loud_percentile = loud_percentile
         self.min_duration = min_duration
+        self.cliff_db = cliff_db
 
     @override
     def evaluate(self, audio, transcript=None):
@@ -51,7 +60,7 @@ class EffectiveBandwidthMetric(Metric):
         """
         Cutoff in Hz, fraction of Nyquist, and the band dynamics the cutoff was derived from.
         """
-        
+
         y = np.asarray(audio["audio"], dtype=np.float64)
         sample_rate = audio["sample_rate"]
         if y.ndim > 1:
@@ -66,16 +75,23 @@ class EffectiveBandwidthMetric(Metric):
 
         dynamics = self._band_dynamics(y, sample_rate)
         speech = np.median(
-            [span for upper, span in dynamics if self.speech_band[0] <= upper <= self.speech_band[1]]
+            [span for upper, span, _ in dynamics if self.speech_band[0] <= upper <= self.speech_band[1]]
         )
 
         cutoff = self.start_hz
-        for upper, span in dynamics:
+        reference = next(level for upper, _, level in dynamics if upper > self.start_hz)
+        for upper, span, level in dynamics:
             if upper <= self.start_hz:
                 continue
-            if span < self.dynamics_ratio * speech:
+            # a band past the cutoff is either dead-flat or carries nothing but codec noise;
+            # both read as no speech, whatever its fluctuation. The energy test is relative to
+            # the last band that carried speech, so natural spectral tilt never trips it.
+            # cliff_db=None restores the dynamics-only walk.
+            if span < self.dynamics_ratio * speech or (
+                    self.cliff_db is not None and level < reference - self.cliff_db):
                 break
             cutoff = upper
+            reference = level
 
         return {
             "cutoff": cutoff,
@@ -110,6 +126,7 @@ class EffectiveBandwidthMetric(Metric):
                 continue
             level = 10 * np.log10(band.mean(axis=1) + 1e-20)
             dynamics.append(
-                (float(upper), float(np.percentile(level, 95) - np.percentile(level, 20)))
+                (float(upper), float(np.percentile(level, 95) - np.percentile(level, 20)),
+                 float(10 * np.log10(band.mean() + 1e-20)))
             )
         return dynamics

@@ -13,6 +13,10 @@ max_duration: 30.0
 # it is the gate that catches 16 kHz sources upsampled into a 24 kHz container.
 bandwidth_min_frac: 0.85
 bandwidth_band_hz: 1000.0        # drop to 500.0 when per-file cutoff precision matters
+bandwidth_cliff_db: 20.0         # a band counts as speech-bearing only if it does not
+                                 # cliff more than this against the band below it; dynamics
+                                 # alone are fooled by codec noise above a lossy encoder's
+                                 # lowpass. null restores the dynamics-only walk.
 
 # Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
 clipping_max_ratio: 0.0001
@@ -33,8 +37,8 @@ flatness_loudness_threshold: 35.0
 # NISQA v2.0, 1-5 per dimension. Gate on discontinuity and coloration: they are ~3x more
 # stable than MOS and noisiness, which move with content alone.
 nisqa_min:
-  mos: 3.35
-  noisiness: 3.3                 
+  mos: 3.25
+  noisiness: 3.4             
   discontinuity: 4.0
   coloration: 3.5
   loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest

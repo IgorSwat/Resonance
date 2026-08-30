@@ -40,6 +40,9 @@ class QualityConfig:
 
     bandwidth_min_frac: float = 0.85
     bandwidth_band_hz: float = 1000.0
+    # a band counts as speech-bearing only if it does not cliff against the band below it;
+    # dynamics alone are fooled by codec noise above a lossy encoder's lowpass
+    bandwidth_cliff_db: float = 20.0
 
     clipping_max_ratio: float = 1e-4
 

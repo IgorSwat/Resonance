@@ -66,7 +66,8 @@ class Pipeline:
             Stage(
                 QualityVerdict.EFFECTIVE_BANDWIDTH,
                 EffectiveBandwidthMetric(
-                    band_hz=config.bandwidth_band_hz, min_duration=config.min_duration
+                    band_hz=config.bandwidth_band_hz, min_duration=config.min_duration,
+                    cliff_db=config.bandwidth_cliff_db,
                 ),
                 {"lbound": config.bandwidth_min_frac, "rbound": 1.0},
             ),
