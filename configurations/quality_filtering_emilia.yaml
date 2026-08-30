@@ -69,6 +69,8 @@ verbalize_numbers_enabled: true
 # CTC forced alignment against the transcript (MMS_FA). loss+maxrate catch audio clipped
 # mid-transcript; gap_speech/trail_speech catch audio saying more than the transcript does.
 ctc_enabled: true                # false skips the stage entirely, for untranscribed audio
+ctc_uroman_enabled: true         # uroman non-ASCII transcripts before alignment; without it,
+                                 # diacritics shatter into unalignable fragments (Kaalsva, not "k lsva")
 ctc_max:
   loss: 1.0
   max_loss: 3.0                  # a loss this high is a defect on its own, whatever maxrate says

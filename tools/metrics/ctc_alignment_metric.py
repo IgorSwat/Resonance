@@ -4,6 +4,7 @@ from typing import override
 import numpy as np
 import torch
 import torchaudio
+from uroman import Uroman
 
 from tools.metrics.metric import Metric
 
@@ -26,16 +27,22 @@ class CtcAlignmentMetric(Metric):
     - **redundant speech** — the audio says more than the transcript does. Every token still
       aligns comfortably, so `loss` barely moves; the evidence is unaligned frames whose
       posterior is not blank. A real pause is blank, unspoken-in-transcript speech is not.
+
+    Transcript normalization begins with uroman over non-ASCII text (disable with
+    `uroman=False`): MMS's alphabet is lowercase Latin plus apostrophe, and normalize() drops
+    every other character, so "Kålsva" would otherwise align as the fragments "k lsva".
     """
 
-    def __init__(self, device=None, windows=(4, 6, 8)):
+    def __init__(self, device=None, windows=(4, 6, 8), uroman=True):
         self.device = device or (
             "cuda" if torch.cuda.is_available()
             else "mps" if torch.backends.mps.is_available()
             else "cpu"
         )
         self.windows = windows
+        self.uroman = uroman
         self._model = None
+        self._uroman = None
 
     @override
     def evaluate(self, audio, transcript=None):
@@ -45,7 +52,7 @@ class CtcAlignmentMetric(Metric):
 
         if not transcript:
             raise ValueError("CtcAlignmentMetric needs a transcript")
-        tokens = tokenize(transcript)
+        tokens = tokenize(self._romanize(transcript))
 
         emission, duration = self._emission(audio)
         target = torch.tensor([[t for token in tokens for t in token]])
@@ -117,12 +124,23 @@ class CtcAlignmentMetric(Metric):
         scored = []
         for transcript in transcripts:
             try:
-                tokens = tokenize(transcript)
+                tokens = tokenize(self._romanize(transcript))
             except ValueError:
                 scored.append(float("inf"))
                 continue
             scored.append(ctc_loss(emission, torch.tensor([[t for tok in tokens for t in tok]])))
         return scored
+
+    def _romanize(self, transcript):
+        """
+        uroman over non-ASCII text, MMS's own recipe; ASCII pays nothing.
+        """
+
+        if not self.uroman or transcript.isascii():
+            return transcript
+        if self._uroman is None:
+            self._uroman = Uroman()
+        return self._uroman.romanize_string(transcript)
 
     def _emission(self, audio):
         if self._model is None:
@@ -160,7 +178,9 @@ def normalize(text):
     """
     MMS romanization: lowercase Latin plus apostrophe. '-' is the blank symbol, never a target.
 
-    Diacritics are dropped, so pl/de/es text must be romanized (uroman) before it gets here.
+    Every other character is dropped, so non-Latin scripts and diacritics must be romanized
+    (uroman, see _romanize) before they get here — "Kålsva" would otherwise shatter into
+    "k lsva" and "Beyoncé" lose its last letter.
     """
 
     text = text.lower().replace("’", "'")

@@ -116,7 +116,8 @@ class Pipeline:
             stages.append(
                 Stage(
                     QualityVerdict.CTC_ALIGNMENT,
-                    CtcAlignmentMetric(device=config.ctc_device),
+                    CtcAlignmentMetric(device=config.ctc_device,
+                                       uroman=config.ctc_uroman_enabled),
                     {"rbound": config.ctc_max},
                 )
             )

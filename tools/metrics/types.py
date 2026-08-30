@@ -77,6 +77,10 @@ class QualityConfig:
     ctc_enabled: bool = True
     ctc_max: dict = field(default_factory=lambda: dict(CTC_RBOUND))
     ctc_device: str | None = None
+    # uroman non-ASCII transcripts before alignment: normalize() drops every character outside
+    # MMS's lowercase-Latin alphabet, so diacritics would shatter words into unalignable
+    # fragments and inflate the loss
+    ctc_uroman_enabled: bool = True
 
     min_duration: float = 5.0
     max_duration: float = 30.0
