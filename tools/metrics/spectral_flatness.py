@@ -14,9 +14,10 @@ class SpectralFlatnessMetric(Metric):
     mains hum, music, or a whine. See knowledge/data_filtering.md §1.0.
 
     Flatness ignores level by construction, so a quiet dither floor scores as high as audible
-    hiss. The upper bound is therefore only enforced when the floor is loud enough to matter,
-    i.e. when speech rises less than loudness_threshold above it. That gap is A-weighted, since
-    an unweighted one is dominated by low-frequency rumble that is inaudible.
+    hiss. Both bounds are therefore only enforced when the floor is close enough to speech to
+    be heard, i.e. when speech rises less than loudness_threshold dB (A-weighted) above it.
+    That gap is A-weighted, since an unweighted one is dominated by low-frequency rumble that
+    is inaudible.
     """
 
     def __init__(
@@ -46,7 +47,7 @@ class SpectralFlatnessMetric(Metric):
         except Exception as error:
             print(f"SpectralFlatnessMetric failed: {error}")
             return False
-        if report["flatness"] < lbound:
+        if report["flatness"] < lbound and report["gap"] < self.loudness_threshold:
             return False
         return report["flatness"] <= rbound or report["gap"] >= self.loudness_threshold
 

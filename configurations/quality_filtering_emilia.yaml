@@ -23,8 +23,9 @@ hum_max_prominence: 15.0
 hum_freq_tolerance: 0.3
 
 # Noise-floor spectral flatness. The ceiling is 0.56 (white noise), not 1.0. The lower bound
-# catches tonal floors; the upper bound only applies when speech fails to rise
-# flatness_loudness_threshold dB (A-weighted) above the floor.
+# catches tonal floors (hum, music bass); the upper bound catches broadband hiss. Both only
+# apply when speech fails to rise flatness_loudness_threshold dB (A-weighted) above the floor,
+# so inaudible floors pass: flatness alone says nothing about whether the floor can be heard.
 flatness_min: 0.0005
 flatness_max: 0.25
 flatness_loudness_threshold: 35.0
@@ -33,7 +34,7 @@ flatness_loudness_threshold: 35.0
 # stable than MOS and noisiness, which move with content alone.
 nisqa_min:
   mos: 3.35
-  noisiness: 3.25                 
+  noisiness: 3.3                 
   discontinuity: 4.0
   coloration: 3.5
   loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest
