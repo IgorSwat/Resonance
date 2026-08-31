@@ -78,7 +78,7 @@ ctc_uroman_enabled: true         # uroman non-ASCII transcripts before alignment
                                  # diacritics shatter into unalignable fragments (Kaalsva, not "k lsva")
 ctc_max:
   loss: 1.0
-  max_loss: 2.0                  # Note that this is pretty restrictive
+  max_loss: 1.0                  # Very restrictive
   maxrate: 30.0
   gap_speech: 0.06
   trail_speech: 0.05
