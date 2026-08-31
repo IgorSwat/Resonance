@@ -1,10 +1,15 @@
 """Download and unpack a range of Emilia batches from HuggingFace.
 
     python scripts/fetch/emilia.py --lang EN --first 1 --last 3
+    python scripts/fetch/emilia.py --type yodas --lang EN --first 1 --last 3
 
-Each batch is one WebDataset tar under Emilia/<LANG>/ in amphion/Emilia-Dataset, and unpacks
-flat: an mp3 and a JSON sidecar per clip. A batch lands in <output-dir>/<lang>-b<id>/, the layout
-scripts/filter/emilia.py expects.
+Each batch is one WebDataset tar under <Emilia|Emilia-YODAS>/<LANG>/ in amphion/Emilia-Dataset,
+and unpacks flat: an mp3 and a JSON sidecar per clip. A batch lands in
+<output-dir>/<lang>-b<id>/, the layout scripts/filter/emilia.py expects — data/Emilia for the
+classic type, data/Emilia-YODAS for yodas.
+
+YODAS is the raw pre-ASR pool: clip IDs are <LANG>_<youtube_id>_W######, the speaker field keeps
+the raw pyannote label, and one video straddles consecutive tars (knowledge/emilia.md §1).
 
 The dataset is gated, so accept its terms on the model page and have a token in HF_TOKEN or
 ~/.cache/huggingface/token. Downloading needs aria2c on PATH. Batches are ~2 GB each; a
@@ -26,18 +31,23 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from scripts.__style__ import Colors, print_info, print_section, print_test_title
 
 LANGUAGES = ("EN", "ZH", "DE", "FR", "JA", "KO")
-BASE_URL = "https://huggingface.co/datasets/amphion/Emilia-Dataset/resolve/main/Emilia"
-OUTPUT_DIR = pathlib.Path("data/Emilia")
+BASE_URL = "https://huggingface.co/datasets/amphion/Emilia-Dataset/resolve/main"
+# dataset name in the repo (also the URL path) -> default output directory
+TYPES = {"classic": ("Emilia", pathlib.Path("data/Emilia")),
+         "yodas": ("Emilia-YODAS", pathlib.Path("data/Emilia-YODAS"))}
 ARIA2 = ("--continue=true", "--auto-file-renaming=false", "--max-connection-per-server=8",
          "--split=8", "--max-tries=10", "--retry-wait=30", "--console-log-level=warn")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--type", default="classic", choices=sorted(TYPES),
+                        help="classic Emilia, or the raw Emilia-YODAS pool")
     parser.add_argument("--lang", default="EN", type=str.upper, choices=LANGUAGES)
     parser.add_argument("--first", type=int, required=True, help="first batch id, inclusive")
     parser.add_argument("--last", type=int, help="last batch id, inclusive (default: --first)")
-    parser.add_argument("--output-dir", type=pathlib.Path, default=OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=pathlib.Path,
+                        help="default: data/Emilia, or data/Emilia-YODAS for --type yodas")
     parser.add_argument("--keep-archives", action="store_true",
                         help="keep the .tar after unpacking instead of deleting it")
     return parser.parse_args()
@@ -45,15 +55,17 @@ def parse_args():
 
 def main():
     args = parse_args()
+    dataset, default_dir = TYPES[args.type]
+    output_dir = args.output_dir or default_dir
     last = args.first if args.last is None else args.last
     if last < args.first:
         raise SystemExit(f"--last {last} is before --first {args.first}")
     ids = range(args.first, last + 1)
 
-    print_test_title(f"Fetching Emilia {args.lang}: batches {args.first}-{last}")
-    print_info("output", args.output_dir)
+    print_test_title(f"Fetching {dataset} {args.lang}: batches {args.first}-{last}")
+    print_info("output", output_dir)
     print_info("archives", "kept" if args.keep_archives else "deleted after unpacking")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     if not shutil.which("aria2c"):
         raise SystemExit("No aria2c on PATH; install it (e.g. `apt install aria2`)")
     bearer = token()
@@ -61,22 +73,22 @@ def main():
     clips = 0
     for batch in tqdm(ids, desc="batches", unit="batch", position=0, leave=True):
         name = f"{args.lang}-B{batch:06d}"
-        directory = args.output_dir / f"{args.lang.lower()}-b{batch:06d}"
+        directory = output_dir / f"{args.lang.lower()}-b{batch:06d}"
         print_section(name)
         if directory.exists() and any(directory.glob("*.json")):
             print_info("skipped", f"{directory} already holds "
                                   f"{sum(1 for _ in directory.glob('*.json'))} clips")
             continue
 
-        archive = args.output_dir / f"{name}.tar"
-        download(f"{BASE_URL}/{args.lang}/{name}.tar", archive, bearer)
+        archive = output_dir / f"{name}.tar"
+        download(f"{BASE_URL}/{dataset}/{args.lang}/{name}.tar", archive, bearer)
         clips += extract(archive, directory)
         if not args.keep_archives:
             archive.unlink()
 
     print_section("Done")
     print_info("clips unpacked", clips)
-    print_info("root", args.output_dir)
+    print_info("root", output_dir)
 
 
 def token():
