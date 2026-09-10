@@ -148,7 +148,7 @@ def _entropy(counts, total):
 
 
 def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, target=None,
-                   high_bounds=None):
+                   high_bounds=None, is_high=None):
     """
     Select rows under a per-speaker floor and ceiling, taking as much data as stays flat.
 
@@ -165,9 +165,14 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, t
     so raising either target never costs a speaker. A ceiling is only a permission: reference
     pitch is not one of the cell axes, so growth past the target is whatever the entropy gate
     allows.
+
+    `is_high` overrides how that test is made, taking a speaker's rows and returning whether
+    they count as a high voice — for corpora that label the speaker instead of relying on
+    measured pitch.
     """
 
     rng = random.Random(seed)
+    is_high = is_high or (lambda clips: clips[0]["ref_hz"] > PITCH_EDGE)
     for row, cell in zip(rows, assign_cells(rows)):
         row["cell"] = cell
 
@@ -177,7 +182,7 @@ def select_bounded(rows, floor=DEFAULT_FLOOR, ceiling=DEFAULT_CEILING, seed=0, t
     bounds = {}
     for speaker, clips in by_speaker.items():
         speaker_target, speaker_ceiling = (
-            high_bounds if high_bounds and clips[0]["ref_hz"] > PITCH_EDGE
+            high_bounds if high_bounds and is_high(clips)
             else (floor if target is None else target, ceiling))
         bounds[speaker] = (min(speaker_target, len(clips)), speaker_ceiling)
     rarity = collections.Counter(row["cell"] for row in rows)

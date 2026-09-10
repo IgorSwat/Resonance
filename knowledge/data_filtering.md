@@ -273,6 +273,14 @@ is scarcer — probably not the right one):
 3. **Lowpass everything to a common bandwidth.** Consistent but permanently gives up brightness.
 4. Bandwidth extension — avoid; substitutes hallucinated HF for missing HF.
 
+**Measured: TTS re-synthesis does not launder a 16 kHz source into full-band.** Cloning a
+ParlaSpeech-PL clip with OmniVoice (24 kHz output, 32 steps, `t_shift=0.1`) and re-generating
+its own transcript moved the cutoff only 8 kHz → 10 kHz, with a cliff to −84 dB above. The
+same model, same text, *without* the reference audio reaches the full 12 kHz Nyquist. So the
+band limit is inherited from the prompt, not a model ceiling — a band-limited reference
+silently caps the brightness of everything cloned from it. Relevant to option 4 above and to
+any plan to upsample scarce Polish data by re-synthesis.
+
 **Cost:** one FFT over ~30 sampled frames per file is enough. Sub-millisecond, CPU-only,
 trivially parallel — can fold into the existing decode loop in `scripts/preprocess/codecs.py`.
 
@@ -744,6 +752,21 @@ so a transcript is a ~22-probe binary search over ranged reads. Language is the 
 `_`-field of the uttid; Polish is ~0.6% of utterances and heavily clustered per recording,
 so sample many scattered windows and dedupe by recording id.
 
+**The utterances are 30 s OWSM windows, not sentences.** Measured over 23,168 sampled
+`wav.scp` uttids: median 28.3 s, 95.5% longer than 20 s, hard cap at 30 s, only 1.5% under
+10 s. So `yodas0.10` alone does not yield TTS-length clips. The sentence-level division is
+inside the `text` field, whose `<start><end>` markers subdivide each window into a median of
+10 caption lines of median 2.5 s (p90 4.3 s); only 29% fall in a 3-10 s band, so lines need
+merging, and the cut points are caption boundaries rather than verified speech edges. `text.ctc`
+is the same transcript with no timestamps, punctuated and cased.
+
+The windows are packed from caption timings, not cut by VAD and not cut on a fixed grid.
+Inside a window the caption lines cover a median 96% of the span and 70% of adjacent lines
+abut exactly, so a window is continuous audio including its pauses. Between windows only 40%
+of consecutive pairs abut: 38% are separated by more than 2 s and the p90 gap is 59 s, because
+uncaptioned or alignment-rejected stretches are dropped whole. Do not assume the utterances of
+one recording tile it — they do not.
+
 Running the Tier-0 metrics on 100 such Polish clips: effective bandwidth and clipping ratio
 carry no signal — YODAS is uniformly 16 kHz with the cutoff at Nyquist on 100/100 files, and
 the clipped-run ratio is 0.0 on 100/100. Mains hum never exceeds 11 dB. NISQA is the only
@@ -781,6 +804,16 @@ this pipeline fills. The gap is language-specific, not YODAS-specific: every lar
 stops at the top ~10 languages and Polish is below the cut. Spanish is well served
 (`LEMAS-Dataset-train` 21.2k h, VoxpopuliTTS 10k h DNSMOS-tiered, CML-TTS 443 h);
 Polish gets CML-TTS at **38.9 h** of LibriVox audiobook (24 kHz, CC-BY-4.0) and little else.
+
+---
+
+## CSV format gotcha
+
+The pipeline's `|`-separated CSVs are written by `csv.writer` and so end every row with **CRLF**,
+while the transcription field may itself contain a bare `\r`. Merging or appending columns with
+shell tools (`awk`, `cut`, `paste`) silently splits rows or lands a new field after the `\r`,
+where `csv.DictReader` reads it as a separate row. Build derived CSVs (`data/data/dataset.csv`)
+with the `csv` module and the shared dialect, and check the row count round-trips.
 
 ---
 

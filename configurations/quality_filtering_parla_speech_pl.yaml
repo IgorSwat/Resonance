@@ -1,0 +1,31 @@
+# Regeneration filter for scripts/filter/parla_speech_pl.py.
+#
+# Only the two stages that script runs are configured: the length gate on the source clip and
+# the CTC check on OmniVoice's regeneration of it. Every other QualityConfig field is left at
+# its default and never read — the audio being judged is synthetic, so the noise, hum and
+# bandwidth gates of the full cascade have nothing to say about it.
+
+# Source clip length, checked before anything is generated. Same bounds as Emilia.
+min_duration: 3.0
+max_duration: 30.0
+
+# Drop transcripts containing a digit, also before anything is generated. OmniVoice reads "45"
+# as words, while the CTC stage aligns against the digits as written, so the loss on those clips
+# measures the spelling rather than the generation. Roughly 19% of the corpus carries a digit
+# (measured on 100 sampled transcripts), in forms like "40 mld", "3,5 mln", "55%" and year
+# ranges. Set false to keep them and accept that their loss is not comparable.
+reject_digits_enabled: true
+
+# CTC forced alignment (MMS_FA) of the regenerated audio against the text it was asked to say.
+# The question here is narrower than in the corpus filters: not "does the transcript match the
+# recording" but "did the model say exactly this", so loss and max_loss carry the weight.
+# maxrate catches a generation that stops partway through the text; gap_speech and
+# trail_speech catch one that adds speech the text never contained.
+ctc_max:
+  loss: 1.0
+  max_loss: 1.5
+  maxrate: 30.0
+  gap_speech: 0.06
+  trail_speech: 0.05
+ctc_uroman_enabled: true         # Polish diacritics shatter into unalignable fragments without it
+ctc_device: null                 # null -> CUDA, else MPS, else CPU

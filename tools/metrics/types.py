@@ -22,6 +22,7 @@ class QualityVerdict(Enum):
     MULTI_SPEAKER = "multi_speaker"
     MULTI_SPEAKER_SOURCE = "multi_speaker_source"
     CTC_ALIGNMENT = "ctc_alignment"
+    DIGITS = "digits"
 
     @property
     def accepted(self):
@@ -70,6 +71,11 @@ class QualityConfig:
     source_min_clips: int = 3
     multi_speaker_max: dict = field(default_factory=lambda: dict(SPEAKER_RBOUND))
     multi_speaker_device: str | None = None
+
+    # scripts/filter/parla_speech_pl.py: drop transcripts containing a digit rather than trying
+    # to verbalize them, since a TTS model is free to read "45" as words the aligner then scores
+    # against the digits as written
+    reject_digits_enabled: bool = True
 
     # phase 1 of scripts/filter/emilia.py: transcript rewrites and source-level deduplication,
     # decided from the sidecars rather than by a metric
