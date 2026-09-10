@@ -77,6 +77,12 @@ class QualityConfig:
     # against the digits as written
     reject_digits_enabled: bool = True
 
+    # scripts/filter/parla_speech_pl.py: RMS the generated audio is scaled to, in dBFS. The
+    # source corpus spans ~14 dB of recording gain that the model never sees, so there is
+    # nothing to preserve by carrying it into the output.
+    output_loudness_enabled: bool = True
+    output_loudness_dbfs: float = -23.0
+
     # phase 1 of scripts/filter/emilia.py: transcript rewrites and source-level deduplication,
     # decided from the sidecars rather than by a metric
     verbalize_numbers_enabled: bool = False

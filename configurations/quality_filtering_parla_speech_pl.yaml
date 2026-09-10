@@ -16,6 +16,19 @@ max_duration: 30.0
 # ranges. Set false to keep them and accept that their loss is not comparable.
 reject_digits_enabled: true
 
+# RMS the generated audio is scaled to, in dBFS. One universal level, not a band.
+#
+# OmniVoice rescales any reference quieter than 0.1 RMS to exactly that before tokenizing, and
+# every ParlaSpeech clip is quieter than that, so the model generates at a constant loudness
+# whatever the recording gain was. It then multiplies its output back down by the level the
+# reference arrived at, reimposing the corpus's ~14 dB spread on audio that never depended on
+# it. Scaling the output undoes that. Emilia never needed it because NISQA gated loudness there.
+#
+# -23 dBFS suits the generated crest factor (median 18.1 dB over 16 clips): peaks land near 0.57
+# and none clip, while -20 clipped 1 clip in 16. Gain is capped short of clipping regardless.
+output_loudness_enabled: true
+output_loudness_dbfs: -23.0
+
 # CTC forced alignment (MMS_FA) of the regenerated audio against the text it was asked to say.
 # The question here is narrower than in the corpus filters: not "does the transcript match the
 # recording" but "did the model say exactly this", so loss and max_loss carry the weight.

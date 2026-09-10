@@ -14,7 +14,9 @@ free to say something other than what it was asked, which is what the CTC stage 
 Nothing else from the quality cascade applies: the audio is synthetic, so its noise floor,
 bandwidth and hum describe the vocoder rather than the recording. Transcripts carrying a digit
 are dropped before regeneration, since the model reads "45" as words the aligner then scores
-against the digits as written; about a fifth of the corpus goes this way.
+against the digits as written; about a fifth of the corpus goes this way. The output is scaled to
+one loudness, since OmniVoice would otherwise carry the corpus's own ~14 dB of recording gain
+into audio the model generated at a constant level.
 
 Regeneration dominates the runtime at roughly a second of compute per second of audio, so
 calibrate with --limit before committing to a shard.
@@ -67,6 +69,7 @@ REFERENCE_PAD = 0.3             # silence appended to the reference, seconds. Pa
                                 # are cut tight to the utterance, leaving no trailing silence
                                 # to mark where it ended.
 DIGIT = re.compile(r"\d")
+PEAK_CEILING = 0.99             # gain is capped so levelling cannot clip a peaky clip
 
 
 def parse_args():
@@ -242,12 +245,35 @@ def judge(row, model, ctc, bounds, config):
         return QualityVerdict.DIGITS, duration, None, None
     # padded for the reference only; duration above is the clip's own, as the CSV reports it
     reference = np.concatenate([source, np.zeros(round(REFERENCE_PAD * rate), source.dtype)])
-    generated = model.generate(text=transcript, ref_audio=(reference, rate), ref_text=transcript,
-                               num_step=NUM_STEP, t_shift=T_SHIFT)[0]
+    generated = level(model.generate(text=transcript, ref_audio=(reference, rate),
+                                     ref_text=transcript, num_step=NUM_STEP, t_shift=T_SHIFT)[0],
+                      config)
     scores = ctc.evaluate({"audio": generated, "sample_rate": GENERATED_RATE}, transcript)
     if missing_words(scores, bounds) or redundant_speech(scores, bounds):
         return QualityVerdict.CTC_ALIGNMENT, duration, generated, scores
     return QualityVerdict.ACCEPTED, duration, generated, scores
+
+
+def level(generated, config):
+    """Scale the generated audio to the configured RMS, capped short of clipping.
+
+    The corpus spans ~14 dB of recording gain, and OmniVoice carries it through: it rescales any
+    reference quieter than 0.1 RMS to exactly that before tokenizing, then multiplies its output
+    back down by the level the reference arrived at. So the model never sees that spread, and
+    reimposing it on the output would keep a nuisance variable the generation does not depend on.
+    Scaling here rather than at the reference also lands on the target exactly, since it happens
+    after the silence removal that shifts an output's RMS unpredictably.
+    """
+
+    if not config.output_loudness_enabled:
+        return generated
+    rms = float(np.sqrt(np.mean(generated ** 2)))
+    peak = float(np.abs(generated).max())
+    if rms <= 0 or peak <= 0:
+        return generated
+
+    gain = 10 ** ((config.output_loudness_dbfs - 20 * np.log10(rms)) / 20)
+    return generated * min(gain, PEAK_CEILING / peak)
 
 
 class Dump:
