@@ -1,0 +1,63 @@
+# Quality-filtering cascade for scripts/filter/wolne_lektury.py.
+#
+# WolneLektury is public-domain Polish audiobooks read by professional voice actors, released at
+# 24 kHz. That is already the codec's rate, so the audio is judged as recorded rather than
+# regenerated, and the full cascade of tools/metrics/pipeline.py applies. Values below are the
+# calibrated defaults of knowledge/data_filtering.md; re-derive them per corpus once a --limit
+# run shows how the rejection breakdown falls.
+
+# Shared floor, checked before any metric runs. Clips average 9.4 s.
+min_duration: 3.0
+max_duration: 30.0
+
+# Fraction of Nyquist still carrying speech. 0.85 is the gate that catches 16 kHz sources
+# upsampled into a 24 kHz container; WolneLektury measured 1.00 on 20 of 20 sampled clips.
+bandwidth_min_frac: 0.85
+bandwidth_band_hz: 1000.0        # drop to 500.0 when per-file cutoff precision matters
+bandwidth_cliff_db: 20.0         # a band counts as speech-bearing only if it does not cliff
+                                 # more than this against the band below it
+
+# Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
+clipping_max_ratio: 0.0001
+
+# Mains hum in dB above the surrounding floor, enforced only when the line locks onto 50/60 Hz.
+hum_max_prominence: 15.0
+hum_freq_tolerance: 0.3
+
+# Noise-floor spectral flatness. The lower bound catches tonal floors (hum, music bass); the
+# upper bound catches broadband hiss. Both apply only when speech fails to rise
+# flatness_loudness_threshold dB (A-weighted) above the floor, so inaudible floors pass.
+flatness_min: 0.0005
+flatness_max: 0.25
+flatness_loudness_threshold: 35.0
+
+# NISQA v2.0, 1-5 per dimension. Gate on discontinuity and coloration: they are ~3x more stable
+# than MOS and noisiness, which move with content alone. The corpus ships a dnsmos column, but it
+# is constant per audiobook (3.5 across all 1000 rows of shard 0), so it says nothing per clip.
+nisqa_min:
+  mos: 2.75
+  noisiness: 3.0
+  discontinuity: 3.5
+  coloration: 3.5
+  loudness: 3.0                  # liberal backstop; loudness is not orthogonal to the rest
+nisqa_max_duration: 50.0         # NISQA raises above ~50 s; chunk long-form audio first
+nisqa_device: null               # null -> CUDA, else MPS, else CPU
+
+# No multi-speaker in this dataset
+multi_speaker_enabled: false      # false skips the stage entirely, and its model load
+multi_speaker_max:
+  second: 0.0                    # 2nd-most-active speaker, overlapping or not
+  overlap: 0.0                   # two speakers at once
+multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
+
+# CTC forced alignment against the transcript (MMS_FA). loss+maxrate catch audio clipped
+# mid-transcript; gap_speech/trail_speech catch audio saying more than the transcript does.
+ctc_enabled: true
+ctc_uroman_enabled: true         # Polish diacritics shatter into unalignable fragments without it
+ctc_max:
+  loss: 1.0
+  max_loss: 1.0
+  maxrate: 30.0
+  gap_speech: 0.06
+  trail_speech: 0.05
+ctc_device: null                 # null -> CUDA, else MPS, else CPU
