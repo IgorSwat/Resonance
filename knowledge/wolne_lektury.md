@@ -92,3 +92,14 @@ Two hypotheses were tested and ruled out:
 So NISQA's ranking is meaningful; only the absolute cut points are wrong. A clip rejected here is
 usually a genuine outlier: `c376e414c8b8` sits at p1–p4 on all five dimensions with a +4.7 dB
 noise-floor rise, against a median of +3.4 dB for the rest of its own audiobook.
+
+## 6. Prosody selection costs two scans of the shards
+
+`tools/prosody` needs each clip twice: once for its pitch median, and again for a contour tracked
+inside its speaker's adapted range, which is not known until every median for that speaker is in.
+The file-based selectors just open the clip twice. A parquet row has no path, so
+`scripts/select/wolne_lektury.py` scans `--root` once per pass instead, plus a third partial scan
+when `--dump-accepted` is set.
+
+Budget for that on a full run: 381 shards at ~430 MB is ~164 GB read per pass. Memory stays flat
+either way, since only a float per clip survives the first pass.

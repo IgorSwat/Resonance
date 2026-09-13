@@ -10,9 +10,6 @@ The audio is read back out of the parquet shards rather than from a directory of
 writes only a CSV, so the shards stay the single copy of the corpus until a clip is actually
 selected, and only the selection is ever written to disk. That costs one scan of --root, which
 stops as soon as the last selected clip is found.
-
-The selected CSV carries the same columns as ParlaSpeech-PL's, so it is read with that corpus's
-pool reader.
 """
 
 import argparse
@@ -28,7 +25,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from scripts.__style__ import Colors, print_info, print_test_title
 from scripts.filter.wolne_lektury import DATASET, ROOT, decode, rows
 from scripts.finalize.libritts import report
-from scripts.select.parla_speech_pl import read_pool
+from scripts.select.wolne_lektury import read_pool
 from tools.codec.higgs import HiggsCodec, to_codec_rate
 
 PROCESSED = pathlib.Path("data/processed/WolneLektury")
