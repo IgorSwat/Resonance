@@ -52,13 +52,21 @@ multi_speaker_max:
   overlap: 0.0                   # two speakers at once
 multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
 
+# Source-level second pass, applied per recording by the filter rather than by the cascade. A
+# recording whose diarised chunks are flagged this often is an interview or a panel, and the rest
+# of its chunks are not trusted either — the per-clip stage cannot see that, because each single
+# chunk really is single-voice.
+source_rejection_enabled: true
+source_max_flag_rate: 0.3        # share of a recording's scored chunks the stage may reject
+source_min_clips: 3              # recordings with fewer scored chunks are left alone
+
 # CTC forced alignment of the clip against its *Whisper* transcript, the last stage to run and
 # the only one that costs a GPU transcription. false keeps the Whisper transcript but stops
 # gating on it.
 ctc_enabled: true
 ctc_uroman_enabled: true         # non-ASCII diacritics shatter into unalignable fragments without it
 ctc_max:
-  loss: 1.0
+  loss: 0.7
   max_loss: 1.0
   maxrate: 30.0
   gap_speech: 0.06

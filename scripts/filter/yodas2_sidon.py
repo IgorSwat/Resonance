@@ -22,6 +22,15 @@ DSP, NISQA and diarisation stages run first and roughly half the utterances are 
 transcript is ever asked for. The CTC stage then aligns the clip against what Whisper heard
 rather than against the caption.
 
+After a recording's last chunk, the whole recording is judged: if the diarisation stage rejected
+more than config.source_max_flag_rate of the chunks it actually scored, every clip from that
+recording is dropped, the way scripts/filter/emilia.py drops a leaky speaker. The per-clip stage
+only sees one chunk at a time, so it cannot notice an interview whose speakers fall cleanly into
+separate chunks; the rate over the recording can. Note the asymmetry with Emilia: a speaker there
+is one voice in one recording, while a video here is one recording that may hold several, so
+dropping a source discards its good voices along with its bad — hence a looser default than
+Emilia's.
+
 Unlike the parquet corpora this one writes its audio out: an utterance is a cut from a long-form
 file and has no addressable existence anywhere else, so --audio-dir holds the accepted clips and
 the later stages read them from there.
@@ -45,6 +54,7 @@ import torchaudio
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from scripts.__style__ import Colors, print_info, print_section, print_test_title
+from scripts.filter.emilia import reached
 from scripts.filter.libritts import report
 from tools.codec.higgs import RESAMPLE
 from tools.metrics.ctc_alignment_metric import CtcAlignmentMetric
@@ -111,12 +121,18 @@ def main():
     whisper = Whisper(args.whisper, args.lang)
     print_info("whisper", f"{whisper.name} ({whisper.backend})")
     print_info("ctc gate", "on" if config.ctc_enabled else "off (transcript kept, not gated)")
+    print_info("source pass", f"drop a recording above {config.source_max_flag_rate:.0%} flagged "
+                              f"clips (min {config.source_min_clips} scored)"
+                              if config.source_rejection_enabled else "off")
 
     print_section("Filtering")
     args.audio_dir.mkdir(parents=True, exist_ok=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    # CTC is not a pipeline stage here, but a clip that reached it passed everything before it
+    order = [stage.verdict for stage in pipeline.stages] + [QualityVerdict.CTC_ALIGNMENT]
     verdicts = collections.Counter()
     accepted, failures, transcribed, start = [], 0, 0, time.time()
+    source, dropped = None, []
 
     with open(args.output, "w", newline="") as handle:
         # Whisper emits no SEPARATOR and no backslash, so the writer never escapes; quotechar=None
@@ -126,6 +142,13 @@ def main():
         writer.writerow(COLUMNS)
         for name, video, audio in utterances(recordings, args.max_gap, args.target_duration,
                                              config.max_duration):
+            if source is not None and source.video != video:
+                resolve(source, writer, args.audio_dir, verdicts, accepted, dropped, config)
+                handle.flush()
+                source = None
+            if source is None:
+                source = Source(video)
+
             try:
                 verdict = pipeline.run(audio)
                 text = None
@@ -146,19 +169,70 @@ def main():
 
             verdicts[verdict] += 1
             done = sum(verdicts.values())
+            if reached(verdict, order):
+                source.scored += 1
+                source.flagged += verdict is QualityVerdict.MULTI_SPEAKER
             if verdict is QualityVerdict.ACCEPTED:
+                # the audio goes to disk now and the row waits: a long recording's chunks are
+                # hundreds of megabytes to hold, its rows are nothing
                 sf.write(args.audio_dir / f"{name}.wav", audio["audio"], audio["sample_rate"])
-                writer.writerow((DATASET, name, text, video, args.lang))
-                handle.flush()
-                accepted.append((video, len(audio["audio"]) / audio["sample_rate"]))
+                source.rows.append(((DATASET, name, text, video, args.lang),
+                                    len(audio["audio"]) / audio["sample_rate"], name))
             if done % PROGRESS_EVERY == 0:
                 rate = done / (time.time() - start)
+                kept = len(accepted) + len(source.rows)
                 print(f"  {done} utterances, {rate:.1f}/s, {transcribed} transcribed, "
-                      f"{100 * len(accepted) / done:.0f}% accepted", flush=True)
+                      f"{100 * kept / done:.0f}% accepted", flush=True)
 
+        if source is not None:
+            resolve(source, writer, args.audio_dir, verdicts, accepted, dropped, config)
+
+    if dropped:
+        print_info("sources rejected",
+                   f"{len(dropped)} recordings over {config.source_max_flag_rate:.0%} flagged, "
+                   f"{sum(len(item.rows) for item in dropped)} of their clips")
     print_info("whisper calls", f"{transcribed} of {sum(verdicts.values())} utterances "
                                 f"({100 * transcribed / max(sum(verdicts.values()), 1):.0f}%)")
     report(verdicts, accepted, failures, time.time() - start, args.output)
+
+
+@dataclasses.dataclass
+class Source:
+    """One recording's tally, held until its last chunk has been judged."""
+
+    video: str
+    rows: list = dataclasses.field(default_factory=list)   # (csv row, duration, clip name)
+    scored: int = 0                 # chunks the diarisation stage actually scored
+    flagged: int = 0                # of those, the ones it rejected
+
+
+def resolve(source, writer, audio_dir, verdicts, accepted, dropped, config):
+    """Commit a finished recording's clips, or drop the source whole.
+
+    The rate is taken over the chunks that reached the diarisation stage, not over every chunk:
+    one rejected on length was never diarised and says nothing about the recording. Clips of a
+    dropped source are unlinked, since their audio was written as it was accepted.
+    """
+
+    if not flagged_source(source, config):
+        for row, duration, _ in source.rows:
+            writer.writerow(row)
+            accepted.append((source.video, duration))
+        return
+
+    for _, _, name in source.rows:
+        (audio_dir / f"{name}.wav").unlink(missing_ok=True)
+    verdicts[QualityVerdict.ACCEPTED] -= len(source.rows)
+    verdicts[QualityVerdict.MULTI_SPEAKER_SOURCE] += len(source.rows)
+    dropped.append(source)
+
+
+def flagged_source(source, config):
+    """Whether the diarisation stage rejected enough of this recording to distrust all of it."""
+
+    return (config.source_rejection_enabled
+            and source.scored >= config.source_min_clips
+            and source.flagged / source.scored >= config.source_max_flag_rate)
 
 
 def discover(args):
