@@ -421,10 +421,10 @@ def utterances(recordings, max_gap, target, limit):
         if not flac.exists():
             print(f"{Colors.WARNING}  no audio for {meta_path.name}{Colors.ENDC}")
             continue
-        chunks = chunk_spans(meta, max_gap, target, limit)
         with sf.SoundFile(flac) as handle:
             rate = handle.samplerate
-            for name, begin, end in chunks:
+            for name, begin, end in chunk_spans(meta, max_gap, target, limit,
+                                                handle.frames / rate):
                 handle.seek(int(begin * rate))
                 y = handle.read(int((end - begin) * rate), dtype="float32")
                 if y.ndim > 1:
@@ -432,12 +432,22 @@ def utterances(recordings, max_gap, target, limit):
                 yield name, meta["video_id"], {"audio": y, "sample_rate": rate}
 
 
-def chunk_spans(meta, max_gap, target, limit):
-    """One recording's joined chunks, as (name, start, end), from its metadata alone."""
+def chunk_spans(meta, max_gap, target, limit, duration=None):
+    """One recording's joined chunks, as (name, start, end).
+
+    Caption timestamps are not bounded by the audio: on the Spanish batch the spans cover 101% of
+    the stated duration at the 90th percentile. A chunk starting at or past the end is dropped and
+    one merely ending past it is clamped, because SoundFile.seek() answers a position beyond the
+    file with `Internal psf_fseek() failed` rather than with a short read. Pass duration=None to
+    count the spans as the metadata states them.
+    """
 
     spans = meta.get("utterances") or {}
-    return merge(list(zip(spans.get("utt_id", []), spans.get("start", []), spans.get("end", []))),
-                 max_gap, target, limit)
+    chunks = merge(list(zip(spans.get("utt_id", []), spans.get("start", []), spans.get("end", []))),
+                   max_gap, target, limit)
+    if duration is None:
+        return chunks
+    return [(name, begin, min(end, duration)) for name, begin, end in chunks if begin < duration]
 
 
 def total_chunks(recordings, max_gap, target, limit):
@@ -445,14 +455,20 @@ def total_chunks(recordings, max_gap, target, limit):
 
     The progress line needs a denominator, and the caption count is not it: joining collapses
     roughly three captions into one chunk. Recordings whose flac is missing are skipped here as
-    utterances() skips them, so the total is what will actually be reached.
+    utterances() skips them, and each audio header is read so that chunks past the end of their
+    recording are dropped from the count exactly as they are from the run — so the total is what
+    will actually be reached.
     """
 
     total = 0
     for meta_path in recordings:
         flac = meta_path.with_name(meta_path.name.replace(".metadata.json", ".flac"))
-        if flac.exists():
-            total += len(chunk_spans(json.loads(meta_path.read_text()), max_gap, target, limit))
+        try:
+            duration = sf.info(flac).duration
+        except Exception:                       # missing or unreadable; utterances() warns on it
+            continue
+        total += len(chunk_spans(json.loads(meta_path.read_text()), max_gap, target, limit,
+                                 duration))
     return total
 
 
