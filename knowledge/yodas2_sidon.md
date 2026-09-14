@@ -218,3 +218,42 @@ video they publish, so one person routinely holds dozens of IDs.
 It found **no merges across 7 videos** from 10 random recordings of one Polish shard, which is
 the expected result rather than a failure — ten recordings drawn at random from a 219-recording
 shard are unlikely to share a host. Run it over a whole shard or several, not over a sample.
+
+## 12. Two failures that only appear on a CUDA box, and the silence behind one of them
+
+### Forking after CUDA is initialised rejects everything, quietly
+
+`scripts/filter/yodas2_sidon.py` loads Whisper onto the GPU in the parent *before* it starts the
+worker pool. Linux's default start method is fork, and a forked child inherits a CUDA context it
+cannot use, so every GPU metric in the worker raises `CUDA driver initialization failed`.
+
+That is not a crash. `MultiSpeakerMetric.validate` catches, prints, and **returns False**, which
+the cascade reads as a rejection — and since diarisation sits before NISQA, nothing downstream
+ever runs. The symptom is a wall of identical messages and a run that rejects ~100% as
+`multi_speaker`. The pool is now created with an explicit `spawn` context.
+
+**macOS spawns by default, so this cannot be reproduced on a Mac.** Anything in this repo that
+forks after touching the GPU has the same exposure; the other filters build only lazy Pipelines in
+the parent, so they do not.
+
+### 1.4% of chunks are digitally silent
+
+Measured over 5,537 chunks across the Italian, Polish and Spanish batches: **77 (1.39%) are
+exactly zero**, and none are merely near-silent. Caption spans do not always cover audio.
+
+Silent audio used to fail `EffectiveBandwidthMetric` with a bare `StopIteration`, whose message is
+the empty string — hence `EffectiveBandwidthMetric failed: ` with nothing after it, preceded by two
+numpy warnings about an empty slice. The loud-frame filter keeps nothing when every frame carries
+the same energy, so no band survives. The metric now says so, and still rejects.
+
+### The VAD step
+
+The cascade judges the audio that is there, not the audio that is missing, so a chunk that opens
+or closes on dead air passes every stage. Silero VAD now runs on survivors, before Whisper is paid
+for: ends longer than `--max-silence` are cut back to `--keep-silence`, and a gap that long
+mid-clip is rejected as `SILENCE`, a new verdict. Trimming that leaves less than `min_duration`
+also reports SILENCE rather than TOO_SHORT, because `reached()` treats TOO_SHORT as never having
+been diarised and would undercount the source pass.
+
+It fires rarely on this corpus — 1 rejection and 1 trim in 194 chunks of Italian — which follows
+from captions tiling the video. It is there for the tail, not the median.

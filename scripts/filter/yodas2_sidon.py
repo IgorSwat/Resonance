@@ -17,10 +17,26 @@ The corpus's own caption text is never written out. It carries punctuation on 0.
 and is cased on 1.7%, which is unusable as a TTS target, so an utterance that survives the
 cascade is re-transcribed with Whisper and it is that transcript which lands in the CSV.
 
+A chunk with no signal at all is dropped before the cascade rather than inside it: 1.4% of them
+are digitally silent, and a stage that meets one can only report a failure, one printed line per
+chunk. A caption boundary is not a speech boundary either, so a chunk can open or close on a long stretch of
+music or dead air that every cascade stage passes happily — the stages judge the audio that is
+there, not the audio that is missing. Silero VAD is run on what survives: dead ends longer than
+--max-silence are cut back to --keep-silence, and a clip with a hole that long in the *middle* is
+rejected outright, since nothing can be trimmed to save it.
+
 **Whisper runs last on purpose.** It is the only stage that costs a GPU transcription, so the
 DSP, NISQA and diarisation stages run first and roughly half the utterances are gone before a
 transcript is ever asked for. The CTC stage then aligns the clip against what Whisper heard
 rather than against the caption.
+
+That split is also what --workers parallelises: the cheap cascade runs in a worker pool, while
+Whisper and the aligner stay in the parent. One Whisper per worker would contend on CUDA and
+cannot exist at all under MLX, which holds a single GPU context per process. Results come back in
+order rather than as they finish, because the source pass below needs a recording's chunks
+together. The pool is spawned rather than forked, since the parent holds a CUDA context by then;
+each worker still builds its own NISQA and segmentation models on the GPU, so pin them to the CPU
+in the config if the card is tight.
 
 After a recording's last chunk, the whole recording is judged: if the diarisation stage rejected
 more than config.source_max_flag_rate of the chunks it actually scored, every clip from that
@@ -40,7 +56,9 @@ import argparse
 import collections
 import csv
 import dataclasses
+import itertools
 import json
+import multiprocessing
 import pathlib
 import random
 import sys
@@ -69,10 +87,13 @@ COLUMNS = ("dataset", "name", "transcription", "speaker_id", "language")
 SEPARATOR = "|"
 MAX_GAP = 3.0                   # silence a chunk may span before it is closed, seconds
 TARGET_DURATION = 8.0           # a chunk closes once it reaches this; see merge()
-WHISPER_RATE = 16000            # both backends assume a 16 kHz mono float32 array
+MODEL_RATE = 16000              # what Whisper and Silero both assume: mono float32 at 16 kHz
+MAX_SILENCE = 3.0               # dead air this long is trimmed at an end, rejected in the middle
+KEEP_SILENCE = 0.4              # silence left at a trimmed end, seconds
 CUDA_MODEL = "large-v3-turbo"                            # faster-whisper's own name
 MLX_MODEL = "mlx-community/whisper-large-v3-turbo"       # the same weights, Metal build
 PROGRESS_EVERY = 200
+WINDOW_PER_WORKER = 8           # chunks queued per worker; see scored()
 
 
 def parse_args():
@@ -89,12 +110,20 @@ def parse_args():
                         help="join consecutive captions separated by at most this many seconds")
     parser.add_argument("--target-duration", type=float, default=TARGET_DURATION,
                         help="a joined chunk closes once it reaches this length")
+    parser.add_argument("--max-silence", type=float, default=MAX_SILENCE,
+                        help="dead air this long is trimmed at an end and rejected in the middle")
+    parser.add_argument("--keep-silence", type=float, default=KEEP_SILENCE,
+                        help="silence left in place at a trimmed end")
     parser.add_argument("--limit", type=int,
                         help="process N random recordings instead of every one")
     parser.add_argument("--seed", type=int, default=0, help="sampling seed used by --limit")
     parser.add_argument("--whisper", help=f"model override (default: {CUDA_MODEL} on CUDA, "
                                           f"{MLX_MODEL} on an Apple GPU)")
     parser.add_argument("--verbose", action="store_true", help="print why each clip was rejected")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="parallel processes for the cheap cascade; each loads its own NISQA "
+                             "and segmentation models, and on CUDA they share the GPU with "
+                             "Whisper, so more is not faster")
     return parser.parse_args()
 
 
@@ -102,15 +131,17 @@ def main():
     args = parse_args()
     config = QualityConfig.from_yaml(args.config) if args.config.exists() else QualityConfig()
     recordings = discover(args)
+    expected = total_chunks(recordings, args.max_gap, args.target_duration, config.max_duration)
 
-    print_test_title(f"Filtering {DATASET}: {len(recordings)} recordings")
+    print_test_title(f"Filtering {DATASET}: {len(recordings)} recordings, {expected} utterances")
     print_info("root", args.root)
     print_info("batch", args.batch or f"all {len({p.parent for p in recordings})}")
     print_info("chunks", f"captions joined across gaps up to {args.max_gap:.1f} s, "
-                         f"closed at {args.target_duration:.1f} s")
+                         f"closed at {args.target_duration:.1f} s -> {expected} utterances")
     print_info("config", args.config if args.config.exists() else "built-in defaults")
     print_info("output", args.output)
     print_info("audio", args.audio_dir)
+    print_info("workers", f"{args.workers} on the cascade, Whisper in the parent")
 
     print_section("Loading models")
     # The cheap stages run without a transcript, so the cascade is built with CTC switched off and
@@ -120,6 +151,9 @@ def main():
     ctc = CtcAlignmentMetric(device=config.ctc_device, uroman=config.ctc_uroman_enabled)
     whisper = Whisper(args.whisper, args.lang)
     print_info("whisper", f"{whisper.name} ({whisper.backend})")
+    vad = Vad(args.max_silence, args.keep_silence)
+    print_info("vad", f"silero: trim ends past {args.max_silence:.1f} s to "
+                      f"{args.keep_silence:.1f} s, reject a gap that long mid-clip")
     print_info("ctc gate", "on" if config.ctc_enabled else "off (transcript kept, not gated)")
     print_info("source pass", f"drop a recording above {config.source_max_flag_rate:.0%} flagged "
                               f"clips (min {config.source_min_clips} scored)"
@@ -140,8 +174,8 @@ def main():
         writer = csv.writer(handle, delimiter=SEPARATOR, quotechar=None,
                             quoting=csv.QUOTE_NONE, escapechar="\\")
         writer.writerow(COLUMNS)
-        for name, video, audio in utterances(recordings, args.max_gap, args.target_duration,
-                                             config.max_duration):
+        stream = utterances(recordings, args.max_gap, args.target_duration, config.max_duration)
+        for name, video, audio, verdict, error in scored(stream, config, args):
             if source is not None and source.video != video:
                 resolve(source, writer, args.audio_dir, verdicts, accepted, dropped, config)
                 handle.flush()
@@ -149,27 +183,34 @@ def main():
             if source is None:
                 source = Source(video)
 
-            try:
-                verdict = pipeline.run(audio)
-                text = None
-                if verdict is QualityVerdict.ACCEPTED:
-                    transcribed += 1
-                    text = whisper.transcribe(audio)
-                    # nothing said is nothing to align: music and applause land here
-                    if not text:
-                        verdict = QualityVerdict.CTC_ALIGNMENT
-                    elif config.ctc_enabled and not ctc.validate(
-                        audio, rbound=config.ctc_max, transcript=text
-                    ):
-                        verdict = QualityVerdict.CTC_ALIGNMENT
-            except Exception as error:
+            # taken before the VAD and Whisper can overwrite the verdict, so it answers "did the
+            # diarisation stage score this chunk", which is what the source tally below needs.
+            # A chunk the cascade never saw reports SILENCE, which is deliberately not in `order`.
+            cascaded = reached(verdict, order)
+            text = None
+            if not error and verdict is QualityVerdict.ACCEPTED:
+                try:
+                    audio, verdict = voiced(audio, vad, config)
+                    if verdict is QualityVerdict.ACCEPTED:
+                        transcribed += 1
+                        text = whisper.transcribe(audio)
+                        # nothing said is nothing to align: music and applause land here
+                        if not text:
+                            verdict = QualityVerdict.CTC_ALIGNMENT
+                        elif config.ctc_enabled and not ctc.validate(
+                            audio, rbound=config.ctc_max, transcript=text
+                        ):
+                            verdict = QualityVerdict.CTC_ALIGNMENT
+                except Exception as failure:
+                    error = str(failure)
+            if error:
                 print(f"{Colors.FAIL}{name}: {error}{Colors.ENDC}", flush=True)
                 failures += 1
                 continue
 
             verdicts[verdict] += 1
             done = sum(verdicts.values())
-            if reached(verdict, order):
+            if cascaded:
                 source.scored += 1
                 source.flagged += verdict is QualityVerdict.MULTI_SPEAKER
             if verdict is QualityVerdict.ACCEPTED:
@@ -181,7 +222,8 @@ def main():
             if done % PROGRESS_EVERY == 0:
                 rate = done / (time.time() - start)
                 kept = len(accepted) + len(source.rows)
-                print(f"  {done} utterances, {rate:.1f}/s, {transcribed} transcribed, "
+                print(f"  {done}/{expected} utterances ({100 * done / expected:.0f}%), "
+                      f"{rate:.1f}/s, {transcribed} transcribed, "
                       f"{100 * kept / done:.0f}% accepted", flush=True)
 
         if source is not None:
@@ -194,6 +236,123 @@ def main():
     print_info("whisper calls", f"{transcribed} of {sum(verdicts.values())} utterances "
                                 f"({100 * transcribed / max(sum(verdicts.values()), 1):.0f}%)")
     report(verdicts, accepted, failures, time.time() - start, args.output)
+
+
+def voiced(audio, vad, config):
+    """Trim the clip's dead ends, or reject it as silence; returns (audio, verdict).
+
+    Rejected when the VAD hears no speech at all, when it hears a hole of vad.max_silence in the
+    middle, or when trimming the ends leaves less than the cascade's own floor. All three are the
+    same defect — a clip that is mostly not speech — so all three report SILENCE rather than
+    borrowing TOO_SHORT, which reached() reads as never having been diarised.
+    """
+
+    trimmed = vad.trim(audio)
+    if trimmed is None:
+        return audio, QualityVerdict.SILENCE
+    if len(trimmed["audio"]) / trimmed["sample_rate"] < config.min_duration:
+        return trimmed, QualityVerdict.SILENCE
+    return trimmed, QualityVerdict.ACCEPTED
+
+
+class Vad:
+    """Silero VAD, run on what the cascade passed and before Whisper is paid for.
+
+    Loaded from the installed package rather than the hub, so it needs no network, and it runs on
+    the CPU in single-digit milliseconds per clip — cheap enough to sit in the parent beside
+    Whisper rather than in the worker pool, which returns verdicts and not audio.
+    """
+
+    def __init__(self, max_silence=MAX_SILENCE, keep=KEEP_SILENCE):
+        from silero_vad import get_speech_timestamps, load_silero_vad
+
+        self.model = load_silero_vad()
+        self.timestamps = get_speech_timestamps
+        self.max_silence = max_silence
+        self.keep = keep
+
+    def trim(self, audio):
+        """The clip with its dead ends cut back, or None when it should be rejected outright."""
+
+        speech = self.timestamps(torch.from_numpy(to_model_rate(audio)), self.model,
+                                 sampling_rate=MODEL_RATE, return_seconds=True)
+        if not speech:
+            return None
+        if any(later["start"] - earlier["end"] >= self.max_silence
+               for earlier, later in zip(speech, speech[1:])):
+            return None
+
+        rate = audio["sample_rate"]
+        duration = len(audio["audio"]) / rate
+        head, tail = speech[0]["start"], duration - speech[-1]["end"]
+        begin = max(0.0, head - self.keep) if head >= self.max_silence else 0.0
+        end = min(duration, speech[-1]["end"] + self.keep) if tail >= self.max_silence else duration
+        if begin == 0.0 and end == duration:
+            return audio
+        return audio | {"audio": audio["audio"][round(begin * rate):round(end * rate)]}
+
+
+def scored(stream, config, args):
+    """Cheap-cascade verdicts for every chunk, in a worker pool unless --workers 1.
+
+    Yields (name, video, audio, verdict, error). Whisper and the aligner are deliberately not in
+    here — see the module docstring — so a worker returns only its verdict and the audio stays in
+    the parent, which needs it for the transcription and for writing the clip out.
+
+    The pool is fed a window at a time: a task carries the chunk's samples, ~770 kB at the default
+    8 s, and Pool's task thread would otherwise drain the whole recording into memory. Results are
+    ordered, not `imap_unordered`, so a recording's chunks stay together for the source pass.
+    """
+
+    if args.workers <= 1:
+        _setup(config, args.verbose)
+        for name, video, audio in stream:
+            verdict, error = _score(audio)
+            yield name, video, audio, verdict, error
+        return
+
+    size = WINDOW_PER_WORKER * args.workers
+    # spawn, never the fork Linux defaults to. By this point the parent has initialised CUDA for
+    # Whisper, and a forked child inherits a context it cannot use: every GPU metric in the worker
+    # then raises "CUDA driver initialization failed", and MultiSpeakerMetric answers a raise with
+    # a rejection — so the run would quietly reject every clip rather than fail. macOS already
+    # spawns by default, which is why this only bites on a CUDA box.
+    with multiprocessing.get_context("spawn").Pool(
+        args.workers, _setup, (config, args.verbose)
+    ) as pool:
+        while window := list(itertools.islice(stream, size)):
+            outcomes = pool.imap(_score, [audio for _, _, audio in window], chunksize=1)
+            for (name, video, audio), (verdict, error) in zip(window, outcomes):
+                yield name, video, audio, verdict, error
+
+
+_pipeline = None
+
+
+def _setup(config, verbose):
+    """One cascade per worker. Single-threaded torch, or the processes fight over cores."""
+
+    global _pipeline
+    torch.set_num_threads(1)
+    _pipeline = Pipeline(dataclasses.replace(config, ctc_enabled=False), verbose=verbose)
+
+
+def _score(audio):
+    """One chunk through the cheap cascade; only the verdict travels back.
+
+    A flat chunk is answered here instead of being handed to the cascade. 1.4% of chunks are
+    digitally silent — caption spans do not always cover audio — and every stage that meets one
+    can only call it a failure, printing a line per chunk; over a full shard that is thousands of
+    them. Peak-to-peak zero is exactly the case the bandwidth metric cannot score, since its
+    loud-frame filter keeps nothing when every frame carries the same energy.
+    """
+
+    if np.ptp(audio["audio"]) == 0:
+        return QualityVerdict.SILENCE, None
+    try:
+        return _pipeline.run(audio), None
+    except Exception as error:
+        return None, str(error)
 
 
 @dataclasses.dataclass
@@ -262,9 +421,7 @@ def utterances(recordings, max_gap, target, limit):
         if not flac.exists():
             print(f"{Colors.WARNING}  no audio for {meta_path.name}{Colors.ENDC}")
             continue
-        spans = meta.get("utterances") or {}
-        chunks = merge(list(zip(spans.get("utt_id", []), spans.get("start", []),
-                                spans.get("end", []))), max_gap, target, limit)
+        chunks = chunk_spans(meta, max_gap, target, limit)
         with sf.SoundFile(flac) as handle:
             rate = handle.samplerate
             for name, begin, end in chunks:
@@ -273,6 +430,30 @@ def utterances(recordings, max_gap, target, limit):
                 if y.ndim > 1:
                     y = y.mean(axis=1)
                 yield name, meta["video_id"], {"audio": y, "sample_rate": rate}
+
+
+def chunk_spans(meta, max_gap, target, limit):
+    """One recording's joined chunks, as (name, start, end), from its metadata alone."""
+
+    spans = meta.get("utterances") or {}
+    return merge(list(zip(spans.get("utt_id", []), spans.get("start", []), spans.get("end", []))),
+                 max_gap, target, limit)
+
+
+def total_chunks(recordings, max_gap, target, limit):
+    """How many chunks the run will judge, walked from the metadata without opening any audio.
+
+    The progress line needs a denominator, and the caption count is not it: joining collapses
+    roughly three captions into one chunk. Recordings whose flac is missing are skipped here as
+    utterances() skips them, so the total is what will actually be reached.
+    """
+
+    total = 0
+    for meta_path in recordings:
+        flac = meta_path.with_name(meta_path.name.replace(".metadata.json", ".flac"))
+        if flac.exists():
+            total += len(chunk_spans(json.loads(meta_path.read_text()), max_gap, target, limit))
+    return total
 
 
 def merge(spans, max_gap, target, limit):
@@ -336,7 +517,7 @@ class Whisper:
     def transcribe(self, audio):
         """What the clip actually says, punctuated and cased; empty when Whisper hears no speech."""
 
-        y = to_whisper_rate(audio)
+        y = to_model_rate(audio)
         if self.mlx is not None:
             spoken = self.mlx.transcribe(y, path_or_hf_repo=self.name, language=self.language,
                                          verbose=None)["text"]
@@ -346,14 +527,14 @@ class Whisper:
         return " ".join(spoken.split())
 
 
-def to_whisper_rate(audio):
-    """Both backends assume 16 kHz; the corpus is 24 kHz. Same kaiser parameters as the codec."""
+def to_model_rate(audio):
+    """Whisper and Silero both want 16 kHz; the corpus is 24 kHz. The codec's kaiser parameters."""
 
     y = np.asarray(audio["audio"], dtype=np.float32)
-    if audio["sample_rate"] == WHISPER_RATE:
+    if audio["sample_rate"] == MODEL_RATE:
         return y
     return torchaudio.functional.resample(torch.from_numpy(y), audio["sample_rate"],
-                                          WHISPER_RATE, **RESAMPLE).numpy()
+                                          MODEL_RATE, **RESAMPLE).numpy()
 
 
 if __name__ == "__main__":

@@ -74,12 +74,19 @@ class EffectiveBandwidthMetric(Metric):
             )
 
         dynamics = self._band_dynamics(y, sample_rate)
+        # Silent or constant-level audio leaves every band empty: the loud-frame filter keeps
+        # nothing when all frames carry the same energy. Said plainly here, because the bare
+        # next() below used to raise StopIteration, whose message is the empty string.
+        if not dynamics:
+            raise ValueError("Silent or constant-level audio: no band carries energy")
         speech = np.median(
             [span for upper, span, _ in dynamics if self.speech_band[0] <= upper <= self.speech_band[1]]
         )
 
         cutoff = self.start_hz
-        reference = next(level for upper, _, level in dynamics if upper > self.start_hz)
+        reference = next((level for upper, _, level in dynamics if upper > self.start_hz), None)
+        if reference is None:
+            raise ValueError(f"No band above {self.start_hz:.0f} Hz at {sample_rate} Hz")
         for upper, span, level in dynamics:
             if upper <= self.start_hz:
                 continue

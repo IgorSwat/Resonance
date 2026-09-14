@@ -23,6 +23,7 @@ class QualityVerdict(Enum):
     MULTI_SPEAKER_SOURCE = "multi_speaker_source"
     CTC_ALIGNMENT = "ctc_alignment"
     DIGITS = "digits"
+    SILENCE = "silence"
 
     @property
     def accepted(self):
