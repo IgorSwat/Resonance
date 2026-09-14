@@ -10,12 +10,9 @@ The audio is read back out of the parquet shards rather than from a directory of
 writes only a CSV, so the shards stay the single copy of the corpus until a clip is actually
 selected, and only the selection is ever written to disk. That costs one scan of the shards for
 --lang, which stops as soon as the last selected clip is found.
-
-read_pool lives here for want of a scripts/select/cml_tts.py; a selection script would own it.
 """
 
 import argparse
-import csv
 import pathlib
 import sys
 import time
@@ -27,12 +24,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from scripts.__style__ import Colors, print_info, print_test_title
 from scripts.fetch.cml_tts import LANGUAGES
-from scripts.filter.cml_tts import DATASET, ROOT, SEPARATOR, clip_name, decode, rows
+from scripts.filter.cml_tts import DATASET, ROOT, clip_name, decode, rows
 from scripts.finalize.libritts import report
+from scripts.select.cml_tts import read_pool
 from tools.codec.higgs import HiggsCodec, to_codec_rate
 
 PROCESSED = pathlib.Path("data/processed/CML-TTS")
-DIALECT = {"delimiter": SEPARATOR, "quotechar": None, "quoting": csv.QUOTE_NONE, "escapechar": "\\"}
 
 
 def parse_args():
@@ -50,7 +47,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    pool = read_pool(args.input)
+    pool, _ = read_pool(args.input)
     wanted = {name for name, _, _ in pool}
     directory = args.root / LANGUAGES[args.lang]
     shards = sorted(directory.glob("*.parquet"))
@@ -93,16 +90,6 @@ def main():
     if wanted:
         print(f"{Colors.WARNING}  {len(wanted)} clips not found under {directory}{Colors.ENDC}")
     report(done, failures, frames, time.time() - start, args)
-
-
-def read_pool(path):
-    """The selected CSV, as (name, transcript, speaker) triples."""
-
-    if not path.exists():
-        raise SystemExit(f"No input pool at {path}; run scripts/filter/cml_tts.py first")
-    with open(path, newline="") as handle:
-        return [(row["name"], row["transcription"], row["speaker_id"])
-                for row in csv.DictReader(handle, **DIALECT)]
 
 
 if __name__ == "__main__":

@@ -1,0 +1,66 @@
+# Quality-filtering cascade for scripts/filter/yodas2_sidon.py.
+#
+# YODAS2-Sidon is YouTube speech restored by the Sidon model and resampled to 24 kHz. The
+# restoration is genuine — content reaches the full 12 kHz Nyquist on 96% of clips — so the audio
+# is judged as delivered and nothing is regenerated. What the corpus does not have is a usable
+# transcript: its captions carry punctuation on 0.1% of utterances. The filter replaces them with
+# Whisper, but only for clips that already passed everything below, so ctc_max is scored against
+# a transcript the corpus never shipped (knowledge/yodas2_sidon.md).
+
+# Shared floor, checked before any metric runs. This is the single largest gate on this corpus:
+# caption segments have a median duration of 2.6 s, so two thirds never reach the cascade.
+min_duration: 3.0
+max_duration: 30.0
+
+# Fraction of Nyquist still carrying speech. Sidon's output passes this easily; the stage is kept
+# because it costs microseconds and would catch a shard that skipped restoration.
+bandwidth_min_frac: 0.85
+bandwidth_band_hz: 1000.0
+bandwidth_cliff_db: 20.0         # a band counts as speech-bearing only if it does not cliff
+                                 # more than this against the band below it
+
+# Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
+clipping_max_ratio: 0.0001
+
+# Mains hum in dB above the surrounding floor, enforced only when the line locks onto 50/60 Hz.
+hum_max_prominence: 15.0
+hum_freq_tolerance: 0.3
+
+# Noise-floor spectral flatness. Worth more here than on the audiobook corpora: YouTube audio
+# carries music beds, and a tonal floor is what those look like to this stage.
+flatness_min: 0.0005
+flatness_max: 0.25
+flatness_loudness_threshold: 35.0
+
+# NISQA v2.0, 1-5 per dimension. Note that Sidon synthesised everything above ~8 kHz, and no
+# stage in this cascade can tell restored high frequencies from recorded ones — coloration is the
+# closest thing to a check on it.
+nisqa_min:
+  noisiness: 3.0
+  discontinuity: 3.75
+  coloration: 3.5
+  loudness: 3.0
+nisqa_max_duration: 50.0
+nisqa_device: null               # null -> CUDA, else MPS, else CPU
+
+# Speech from a second speaker, in seconds (pyannote segmentation 3.0). This rejects ~18% of what
+# reaches it: interviews and panel shows are ordinary YouTube content. It does not catch a video
+# whose speakers are split cleanly across clips — see knowledge/yodas2_sidon.md §6.
+multi_speaker_enabled: true
+multi_speaker_max:
+  second: 0.0                    # 2nd-most-active speaker, overlapping or not
+  overlap: 0.0                   # two speakers at once
+multi_speaker_device: null       # null -> CUDA, else MPS, else CPU
+
+# CTC forced alignment of the clip against its *Whisper* transcript, the last stage to run and
+# the only one that costs a GPU transcription. false keeps the Whisper transcript but stops
+# gating on it.
+ctc_enabled: true
+ctc_uroman_enabled: true         # non-ASCII diacritics shatter into unalignable fragments without it
+ctc_max:
+  loss: 1.0
+  max_loss: 1.0
+  maxrate: 30.0
+  gap_speech: 0.06
+  trail_speech: 0.05
+ctc_device: null                 # null -> CUDA, else MPS, else CPU

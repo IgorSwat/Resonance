@@ -73,3 +73,40 @@ narrators rather than a thinning of all of them.
 | nisqa | 2 |
 
 8.4 clips/s on 4 workers. Only 2 of the shard's 4 narrators survived, which is §4 showing through.
+
+## 6. Spanish is a much healthier subset than Polish
+
+Same corpus, same script, very different data. Measured on the Spanish `dev` shard (787 rows,
+288 clips over 3 s, many narrators against Polish's four).
+
+| | Polish | Spanish |
+|---|---|---|
+| train shards | 12 (~8 GB) | 203 (~70 GB) |
+| clips below the 0.85 bandwidth gate | 47% | 13% |
+| transcripts with out-of-alphabet letters | 14% | 0% |
+| narrators in one accepted 150-clip run | 2 | 13 |
+
+**The §3 mojibake is Polish-only** — zero Spanish transcripts carry a letter outside the Spanish
+alphabet. The §4 per-narrator bandwidth spread is still there but far milder: most Spanish
+narrators sit at 0.92–1.00 with only the occasional 0.67 outlier, rather than Polish's two clean
+narrators against two bad ones.
+
+Acceptance happened to land at 34% for both, but for opposite reasons:
+
+| verdict | Polish | Spanish |
+|---|---|---|
+| effective_bandwidth | 60 | 17 |
+| too_short | 24 | 0 |
+| nisqa | 2 | 42 |
+| ctc_alignment | 8 | 37 |
+
+Spanish clips are longer (12.5 s accepted average against 9.8 s), so nothing fails the 3 s floor,
+and the load shifts onto NISQA and CTC. The high CTC rate is §2's `levenshtein` tail showing
+through. **Do not carry a Polish calibration over to Spanish, or the reverse.**
+
+## 7. LEMAS is not an alternative for this pipeline
+
+`LEMAS-Project/LEMAS-Dataset-train` advertises 21,224 h of Spanish with word-level alignments and
+does ship audio, 22 shards over 491 GB. But the audio is **16 kHz mp3** with YODAS-style keys
+(`es_kqS7eC6eMbI-00674-...`), and the average utterance is 2.89 s, under the 3 s floor. It is a
+YODAS derivative wearing a manifest, not a 24 kHz source.
