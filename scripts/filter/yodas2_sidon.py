@@ -307,7 +307,10 @@ def scored(stream, config, args):
     if args.workers <= 1:
         _setup(config, args.verbose)
         for name, video, audio in stream:
-            verdict, error = _score(audio)
+            try:
+                verdict, error = _score(audio)
+            except Exception as failure:        # _score guards itself; this is the backstop
+                verdict, error = None, str(failure)
             yield name, video, audio, verdict, error
         return
 
@@ -322,7 +325,16 @@ def scored(stream, config, args):
     ) as pool:
         while window := list(itertools.islice(stream, size)):
             outcomes = pool.imap(_score, [audio for _, _, audio in window], chunksize=1)
-            for (name, video, audio), (verdict, error) in zip(window, outcomes):
+            for name, video, audio in window:
+                # imap re-raises a worker's exception at the position it belongs to, and later
+                # results still arrive — so this reports the chunk and keeps the run alive rather
+                # than losing every hour of work behind it.
+                try:
+                    verdict, error = next(outcomes)
+                except StopIteration:
+                    break
+                except Exception as failure:
+                    verdict, error = None, str(failure)
                 yield name, video, audio, verdict, error
 
 
@@ -347,9 +359,11 @@ def _score(audio):
     loud-frame filter keeps nothing when every frame carries the same energy.
     """
 
-    if np.ptp(audio["audio"]) == 0:
-        return QualityVerdict.SILENCE, None
     try:
+        # `size and` because a clamped chunk can round to zero frames, and np.ptp has no identity
+        # on an empty array. An empty chunk is a length problem, so the cascade names it TOO_SHORT.
+        if audio["audio"].size and np.ptp(audio["audio"]) == 0:
+            return QualityVerdict.SILENCE, None
         return _pipeline.run(audio), None
     except Exception as error:
         return None, str(error)
@@ -416,17 +430,28 @@ def utterances(recordings, max_gap, target, limit):
     """
 
     for meta_path in recordings:
-        meta = json.loads(meta_path.read_text())
         flac = meta_path.with_name(meta_path.name.replace(".metadata.json", ".flac"))
-        if not flac.exists():
-            print(f"{Colors.WARNING}  no audio for {meta_path.name}{Colors.ENDC}")
+        try:
+            meta = json.loads(meta_path.read_text())
+            if not flac.exists():
+                raise FileNotFoundError("no audio beside the metadata")
+            handle = sf.SoundFile(flac)
+        except Exception as error:
+            print(f"{Colors.WARNING}  skipping {meta_path.name}: {error}{Colors.ENDC}", flush=True)
             continue
-        with sf.SoundFile(flac) as handle:
+
+        with handle:
             rate = handle.samplerate
             for name, begin, end in chunk_spans(meta, max_gap, target, limit,
                                                 handle.frames / rate):
-                handle.seek(int(begin * rate))
-                y = handle.read(int((end - begin) * rate), dtype="float32")
+                # guarded per chunk, not per recording: one span the file cannot answer costs
+                # that span and nothing else
+                try:
+                    handle.seek(int(begin * rate))
+                    y = handle.read(int((end - begin) * rate), dtype="float32")
+                except Exception as error:
+                    print(f"{Colors.WARNING}  skipping {name}: {error}{Colors.ENDC}", flush=True)
+                    continue
                 if y.ndim > 1:
                     y = y.mean(axis=1)
                 yield name, meta["video_id"], {"audio": y, "sample_rate": rate}
@@ -463,12 +488,11 @@ def total_chunks(recordings, max_gap, target, limit):
     total = 0
     for meta_path in recordings:
         flac = meta_path.with_name(meta_path.name.replace(".metadata.json", ".flac"))
-        try:
-            duration = sf.info(flac).duration
-        except Exception:                       # missing or unreadable; utterances() warns on it
+        try:                                    # unreadable either way; utterances() warns on it
+            total += len(chunk_spans(json.loads(meta_path.read_text()), max_gap, target, limit,
+                                     sf.info(flac).duration))
+        except Exception:
             continue
-        total += len(chunk_spans(json.loads(meta_path.read_text()), max_gap, target, limit,
-                                 duration))
     return total
 
 
