@@ -22,6 +22,7 @@ class QualityVerdict(Enum):
     MULTI_SPEAKER = "multi_speaker"
     MULTI_SPEAKER_SOURCE = "multi_speaker_source"
     CTC_ALIGNMENT = "ctc_alignment"
+    SPEAKER_DRIFT = "speaker_drift"
     DIGITS = "digits"
     SILENCE = "silence"
 
@@ -72,6 +73,13 @@ class QualityConfig:
     source_min_clips: int = 3
     multi_speaker_max: dict = field(default_factory=lambda: dict(SPEAKER_RBOUND))
     multi_speaker_device: str | None = None
+
+    # scripts/filter/yodas2_sidon.py: a last pass over the clips that passed CTC, flagging those
+    # whose ECAPA speaker-drift similarity sits at or below speaker_drift_max_z within its
+    # duration band — the scan of scripts/finalize/*_prune.py, run inside the filter
+    speaker_drift_enabled: bool = False
+    speaker_drift_max_z: float = -2.0
+    speaker_drift_device: str | None = None
 
     # scripts/filter/parla_speech_pl.py: drop transcripts containing a digit rather than trying
     # to verbalize them, since a TTS model is free to read "45" as words the aligner then scores

@@ -148,12 +148,13 @@ class CtcAlignmentMetric(Metric):
         y = np.asarray(audio["audio"], dtype=np.float32)
         if y.ndim > 1:
             y = y.mean(axis=1)
-        waveform = torch.from_numpy(y)[None]
+        # resampled on the model's device; on one CPU thread it cost as much as the forward
+        waveform = torch.from_numpy(y)[None].to(self.device)
         if audio["sample_rate"] != BUNDLE.sample_rate:
             waveform = torchaudio.functional.resample(
                 waveform, audio["sample_rate"], BUNDLE.sample_rate)
         with torch.inference_mode():
-            emission, _ = self._model(waveform.to(self.device))
+            emission, _ = self._model(waveform)
         return emission.cpu(), waveform.shape[1] / BUNDLE.sample_rate
 
 

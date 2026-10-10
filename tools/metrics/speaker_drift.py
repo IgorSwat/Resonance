@@ -91,21 +91,22 @@ class SpeakerDriftMetric(Metric):
         y = np.asarray(audio["audio"], dtype=np.float32)
         if y.ndim > 1:
             y = y.mean(axis=1)
-        waveform = torch.from_numpy(y)[None]
+        # resampled and windowed on the model's device, one sync for the whole clip
+        waveform = torch.from_numpy(y)[None].to(self.device)
         if audio["sample_rate"] != SAMPLE_RATE:
             waveform = torchaudio.functional.resample(waveform, audio["sample_rate"], SAMPLE_RATE)
 
-        y = waveform[0]
         size, hop = int(self.window * SAMPLE_RATE), int(self.hop * SAMPLE_RATE)
-        windows = [y[start:start + size] for start in range(0, len(y) - size + 1, hop)]
+        if waveform.shape[1] < size:
+            return np.empty((0, 0))
+        windows = waveform[0].unfold(0, size, hop)
         floor = 10 ** (self.silence_db / 20)
-        windows = [w for w in windows if float(w.square().mean().sqrt()) > floor]
+        windows = windows[windows.square().mean(dim=1).sqrt() > floor]
         if len(windows) < 2:
             return np.empty((0, 0))
 
         with torch.inference_mode():
-            batch = torch.stack(windows).to(self.device)
-            embeddings = self._model.encode_batch(batch).squeeze(1)
+            embeddings = self._model.encode_batch(windows).squeeze(1)
         embeddings = torch.nn.functional.normalize(embeddings, dim=1)
         return embeddings.cpu().numpy()
 
