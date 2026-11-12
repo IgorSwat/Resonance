@@ -93,7 +93,9 @@ class MultiSpeakerMetric(Metric):
         y = np.asarray(audio["audio"], dtype=np.float32)
         if y.ndim > 1:
             y = y.mean(axis=1)
-        waveform = torch.from_numpy(y)[None]
+        # resampled on the model's device: the Kaiser kernel is a long convolution, and on one CPU
+        # thread it cost more than the model itself
+        waveform = torch.from_numpy(y)[None].to(self.device)
         if audio["sample_rate"] != SAMPLE_RATE:
             # Kaiser-best rather than the default kernel: the aliasing the cheap one leaves
             # near Nyquist reads as extra speaker activity, inflating both scores by ~30%.
@@ -101,15 +103,15 @@ class MultiSpeakerMetric(Metric):
                 waveform, audio["sample_rate"], SAMPLE_RATE, **RESAMPLE)
 
         window = int(self._model.specifications.duration * SAMPLE_RATE)
-        y = waveform[0].numpy()
+        y = waveform[0]
         if len(y) <= window:
-            chunks = [np.pad(y, (0, window - len(y)))]
+            chunks = [torch.nn.functional.pad(y, (0, window - len(y)))]
         else:
             starts = range(0, len(y) - window + 1, int(self.step * SAMPLE_RATE))
             chunks = [y[start:start + window] for start in starts] + [y[-window:]]
 
         with torch.inference_mode():
-            batch = torch.from_numpy(np.stack(chunks)).to(self.device)[:, None]
+            batch = torch.stack(chunks)[:, None]
             activity = self._powerset.to_multilabel(self._model(batch))
         return activity.cpu().numpy()
 

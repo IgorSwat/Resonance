@@ -1,14 +1,11 @@
 from typing import override
 
+import librosa
 import numpy as np
 import torch
 # torchmetrics' public entry point pins the model to the CPU, so its parts are driven directly
 # instead; see NisqaMetric._predict.
-from torchmetrics.functional.audio.nisqa import (
-    _get_librosa_melspec,
-    _load_nisqa_model,
-    _segment_specs,
-)
+from torchmetrics.functional.audio.nisqa import _load_nisqa_model
 
 from tools.metrics.metric import Metric
 
@@ -32,6 +29,7 @@ class NisqaMetric(Metric):
         )
         self._model = None
         self._args = None
+        self._mel = None                # (sample rate, filterbank, window), built on first use
 
     @override
     def evaluate(self, audio, transcript=None):
@@ -52,15 +50,13 @@ class NisqaMetric(Metric):
 
         torchmetrics loads the checkpoint with map_location='cpu' and never moves it, which
         leaves the framewise CNN — ~245 windows per clip, each a stack of six tiny convolutions
-        — on one core, at ~15x the GPU's cost. The mel spectrogram stays on the CPU because it
-        is librosa's.
+        — on one core, at ~15x the GPU's cost.
         """
 
         if self._model is None:
             model, self._args = _load_nisqa_model()
             self._model = model.to(self.device).eval()
-        melspec = _get_librosa_melspec(waveform, sample_rate, self._args)
-        spec, windows = _segment_specs(torch.from_numpy(melspec), self._args)
+        spec, windows = self._segments(self._melspec(waveform, sample_rate))
         windows = windows.expand(spec.shape[0])
 
         # NISQA builds its padding masks with torch.arange, which without this lands them on
@@ -70,6 +66,57 @@ class NisqaMetric(Metric):
             x, counts = self._model.time_dependency(x, windows.to(self.device))
             scores = torch.cat([pool(x, counts) for pool in self._model.pool_layers], dim=1)
         return scores.reshape(-1).tolist()
+
+    def _melspec(self, waveform, sample_rate):
+        """torchmetrics' _get_librosa_melspec, on the model's device.
+
+        librosa's STFT and filterbank product ran on one CPU core at ~70 ms a clip, most of the
+        stage's cost; this is the same transform — periodic Hann window centred in n_fft,
+        reflect padding, magnitude, librosa's own Slaney filterbank, dB with an 80 dB floor below
+        each clip's peak — at a fraction of it.
+        """
+
+        args = self._args
+        hop, win, n_fft = (int(sample_rate * args["ms_hop_length"]),
+                           int(sample_rate * args["ms_win_length"]), args["ms_n_fft"])
+        if self._mel is None or self._mel[0] != sample_rate:
+            basis = librosa.filters.mel(sr=sample_rate, n_fft=n_fft, n_mels=args["ms_n_mels"],
+                                        fmin=0.0, fmax=args["ms_fmax"], htk=False, norm="slaney")
+            self._mel = (sample_rate, torch.from_numpy(basis).to(self.device),
+                         torch.hann_window(win, device=self.device))
+            device = torch.device(self.device)
+            if device.type == "cuda":
+                # every clip length is a new cuFFT plan, cached with its GPU workspace up to 4096
+                # of them; with several workers sharing the card that runs it out of memory
+                index = torch.cuda.current_device() if device.index is None else device.index
+                torch.backends.cuda.cufft_plan_cache[index].max_size = 16
+        _, basis, window = self._mel
+
+        y = torch.from_numpy(np.ascontiguousarray(waveform)).to(self.device)
+        try:
+            spectrum = torch.stft(y, n_fft, hop, win, window, center=True, pad_mode="reflect",
+                                  return_complex=True)
+        except RuntimeError:
+            # cuFFT still fails to allocate a plan now and then on a full card, and a raise here
+            # rejects the clip; the CPU computes the same transform
+            spectrum = torch.stft(y.cpu(), n_fft, hop, win, window.cpu(), center=True,
+                                  pad_mode="reflect", return_complex=True).to(self.device)
+        magnitude = spectrum.abs()
+        db = 20 * torch.log10((basis @ magnitude).clamp(min=1e-4))
+        return torch.maximum(db, db.amax(dim=(1, 2), keepdim=True) - 80.0)
+
+    def _segments(self, melspec):
+        """torchmetrics' _segment_specs on the model's device: overlapping windows, zero-padded."""
+
+        length, hop, most = (self._args["ms_seg_length"], self._args["ms_seg_hop_length"],
+                             self._args["ms_max_segments"])
+        if melspec.shape[2] < length:
+            raise RuntimeError("Input signal is too short.")
+        x = melspec.unfold(2, length, hop).transpose(1, 2)    # (batch, windows, mels, length)
+        count = x.shape[1]
+        if most < count:
+            raise RuntimeError("Maximum number of mel spectrogram windows exceeded. Use shorter audio.")
+        return torch.nn.functional.pad(x, (0, 0, 0, 0, 0, most - count)), torch.tensor(count)
 
     @override
     def validate(self, audio, lbound=None, rbound=None, transcript=None):

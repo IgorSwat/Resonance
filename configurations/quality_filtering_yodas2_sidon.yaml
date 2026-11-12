@@ -3,12 +3,11 @@
 # YODAS2-Sidon is YouTube speech restored by the Sidon model and resampled to 24 kHz. The
 # restoration is genuine — content reaches the full 12 kHz Nyquist on 96% of clips — so the audio
 # is judged as delivered and nothing is regenerated. What the corpus does not have is a usable
-# transcript: its captions carry punctuation on 0.1% of utterances. The filter replaces them with
-# Whisper, but only for clips that already passed everything below, so ctc_max is scored against
-# a transcript the corpus never shipped (knowledge/yodas2_sidon.md).
+# transcript: its captions carry punctuation on 0.1% of utterances. scripts/segment/yodas2_sidon.py
+# cuts sentence-aligned utterances and transcribes them with Whisper, and the filter judges those,
+# so ctc_max is scored against a transcript the corpus never shipped (knowledge/yodas2_sidon.md).
 
-# Shared floor, checked before any metric runs. This is the single largest gate on this corpus:
-# caption segments have a median duration of 2.6 s, so two thirds never reach the cascade.
+# Shared floor, checked before any metric runs. The segmenter already cuts 3-25 s utterances.
 min_duration: 3.0
 max_duration: 30.0
 
@@ -37,8 +36,8 @@ flatness_loudness_threshold: 35.0
 # closest thing to a check on it.
 nisqa_min:
   noisiness: 3.0
-  discontinuity: 3.75
-  coloration: 3.5
+  discontinuity: 3.5
+  coloration: 3.25
   loudness: 3.0
 nisqa_max_duration: 50.0
 nisqa_device: null               # null -> CUDA, else MPS, else CPU
@@ -60,9 +59,8 @@ source_rejection_enabled: true
 source_max_flag_rate: 0.3        # share of a recording's scored chunks the stage may reject
 source_min_clips: 3              # recordings with fewer scored chunks are left alone
 
-# CTC forced alignment of the clip against its *Whisper* transcript, the last stage to run and
-# the only one that costs a GPU transcription. false keeps the Whisper transcript but stops
-# gating on it.
+# CTC forced alignment of the clip against its segmenter (Whisper) transcript. A loss above
+# max_loss always rejects; above loss, it rejects only together with a maxrate spike.
 ctc_enabled: true
 ctc_uroman_enabled: true         # non-ASCII diacritics shatter into unalignable fragments without it
 ctc_max:
@@ -72,3 +70,11 @@ ctc_max:
   gap_speech: 0.06
   trail_speech: 0.05
 ctc_device: null                 # null -> CUDA, else MPS, else CPU
+
+# Last pass, over the clips that passed CTC: SpeakerDriftMetric (ECAPA, the lowest similarity
+# between two 2 s windows of the clip) flags a second voice the diarisation stage merged. Its
+# similarity falls with clip length, so a clip is flagged at z <= speaker_drift_max_z within its
+# duration band, as scripts/finalize/yodas2_sidon_prune.py does.
+speaker_drift_enabled: true
+speaker_drift_max_z: -2.0
+speaker_drift_device: null       # null -> CUDA, else MPS, else CPU

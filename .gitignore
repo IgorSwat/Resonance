@@ -37,3 +37,6 @@ tmp/
 # Heavy data files
 data/**/*
 !data/.gitkeep
+# Claude Code, per-user
+.claude/settings.local.json
+CLAUDE.local.md

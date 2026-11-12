@@ -2,15 +2,14 @@
 
     python scripts/finalize/yodas2_sidon.py --input yodas2_sidon_selected.csv
 
-Takes the output of scripts/select/yodas2_sidon.py and materialises the subset: the wav next to
-the tokens, one file each per clip. The clips are Sidon's own 24 kHz output, already the rate the
+Takes the output of scripts/select/yodas2_sidon.py or scripts/select/yodas2_sidon_dce.py and
+materialises the subset: the wav next to the tokens, one file each per clip. The clips are Sidon's own 24 kHz output, already the rate the
 codec wants, so nothing is resampled in practice. Tokens are stored int16 as OmniVoice does — the
 codebook is 1024 wide, so the narrower type halves the files without losing anything.
 
-The clips are copied rather than moved, so the filter's own output under --root stays intact and
-scripts/finalize/yodas2_sidon_prune.py can work on the copy. Run that next: the per-clip
-diarisation stage merges two voices taking clean turns, and what it misses is exactly what a
-subset this small cannot afford.
+The clips are copied rather than moved, so the segmenter's clips under --root stay intact.
+scripts/filter/yodas2_sidon.py already runs the speaker-drift pass of
+scripts/finalize/yodas2_sidon_prune.py, so a subset selected from its output needs no pruning.
 """
 
 import argparse

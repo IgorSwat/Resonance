@@ -257,3 +257,34 @@ been diarised and would undercount the source pass.
 
 It fires rarely on this corpus — 1 rejection and 1 trim in 194 chunks of Italian — which follows
 from captions tiling the video. It is there for the tail, not the median.
+
+## 13. Caption spans overrun the audio, and the fix has a degenerate edge
+
+Caption timestamps are not bounded by the file: on the Spanish batch the spans cover 101% of the
+stated duration at the 90th percentile. Two failures follow, both of which killed long runs.
+
+**A span starting past the end.** `SoundFile.seek()` answers a position beyond the file with
+`Internal psf_fseek() failed` rather than a short read — unlike `read()`, which tolerates EOF. One
+such span took down a run 9% in, after ~8,400 paid transcriptions. `chunk_spans` now takes the
+real audio duration, drops a chunk starting at or past the end, and clamps one that merely ends
+past it. `total_chunks` reads each audio header so the progress denominator applies the same rule.
+
+**A clamped span rounding to nothing.** A chunk beginning a fraction of a second before the end
+survives the clamp, and `int((end - begin) * rate)` then rounds to zero frames. `np.ptp` has no
+identity on an empty array, so the silence check raised — and it sat *outside* `_score`'s try, so
+the exception crossed the pool and ended a run at 76%, after ~83,000 transcriptions.
+
+### The robustness posture that followed
+
+A single unusable chunk out of 148,545 must not cost the hours behind it. So:
+
+- `_score` does all its work inside the try, empty arrays included, and an empty chunk falls
+  through to the cascade, which names it TOO_SHORT rather than SILENCE.
+- `scored()` pulls pool results one at a time. `imap` re-raises a worker's exception at that
+  item's position and later results still arrive, so a failed chunk is reported and the run
+  continues. Verified against a task that cannot even be pickled.
+- `utterances()` guards each seek separately from the file open, so one span a file cannot answer
+  costs that span rather than the whole recording.
+
+Every one of these reports the chunk through the filter's existing `failures` counter, so a run
+that quietly starts failing everything is still visible in the summary.
