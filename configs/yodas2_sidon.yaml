@@ -1,0 +1,134 @@
+# The YODAS2-Sidon pipeline. Every key is optional except run.name and source; the values below are the defaults
+# (resonance/config/schema.py). An unknown key is an error. Override one key from the command line with
+#   --set quality.nisqa.min.noisiness=3.2
+#
+# YODAS2-Sidon is YouTube speech restored by the Sidon model and resampled to 24 kHz. The restoration is genuine:
+# content reaches the full 12 kHz Nyquist on 96% of clips, so the audio is judged as delivered. What the corpus
+# lacks is a usable transcript: its captions carry punctuation on 0.1% of utterances. The segment stage cuts
+# sentence-aligned utterances and transcribes them with Whisper, and the filters judge those
+# (knowledge/yodas2_sidon.md).
+
+run:
+  name: en001_91
+  data_root: data/yodas2_sidon     # raw/, clips/, batches/ and runs/<name>/ live under it
+
+source:
+  language: en
+  batches:                         # any number of ranges; shard ids are strings, so keep the quotes
+    - {shard: "001", first: 91, last: 91}
+
+resources:
+  gpus: all                        # or a list of indices, e.g. [0, 1]
+  fetch_ahead: 3                   # raw batches (about 3 GB each) downloaded ahead of the GPUs
+  cpu_workers: 8                   # processes that read, resample and VAD recordings ahead of Whisper, per GPU
+  threads_per_worker: 4            # thread cap of every worker process
+
+disk:                              # used only for the disk warning
+  raw_gb_per_batch: 3.0
+  clips_gb_per_batch: 3.5          # segmented clips of one batch, before rejected audio is discarded
+  kept_share: 0.5                  # share of the segmented audio that survives the filters
+
+# The stages, in order. Remove a name to skip that stage; source_pass and speaker_drift can also be switched off
+# below. Batch stages (up to discard_rejected) run once per batch, the rest once over all batches.
+pipeline: [fetch, segment, quality, source_pass, speaker_drift, discard_rejected,
+           merge, speaker_fixup, select, finalize]
+
+segment:
+  whisper: large-v3-turbo          # faster-whisper model name
+  batch_size: 16                   # Whisper windows per batch
+  beam_size: 5
+  margin: 2.0                      # seconds read beyond the first and last caption
+  target_duration: 8.0             # an utterance closes at the first clean boundary past this
+  min_duration: 3.0
+  max_duration: 25.0
+  max_pause: 2.0                   # a longer pause inside an utterance ends it
+  min_gap: 0.15                    # a cut needs at least this much silence
+  lead: 0.1                        # silence kept before the speech; OmniVoice's prompt keeps 100 ms
+  trail: 0.2                       # and after it; the prompt keeps 200 ms
+  keep_raw: false                  # false deletes the raw batch once it is segmented
+
+quality:
+  # Shared floor, checked before any metric runs. The segmenter already cuts 3-25 s utterances.
+  min_duration: 3.0
+  max_duration: 30.0
+  # The cascade, cheapest first; a clip stops at the first metric it fails. Remove a name to switch a metric off.
+  metrics: [bandwidth, clipping, hum, flatness, multi_speaker, nisqa, ctc]
+  workers: 6                       # processes per GPU, each holding every model; the GPU saturates by 6, and at
+                                   # 10 a 24 GB card runs out of memory
+  max_error_rate: 0.01             # the stage stops when more than this share of its clips raise an error
+
+  # Fraction of Nyquist still carrying speech. Sidon's output passes this easily; kept because it costs
+  # microseconds and would catch a shard that skipped restoration.
+  bandwidth:
+    min_frac: 0.85
+    band_hz: 1000.0
+    cliff_db: 20.0                 # a band counts as speech-bearing only if it does not cliff more than this
+                                   # against the band below it
+  # Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
+  clipping:
+    max_ratio: 0.0001
+  # Mains hum in dB above the surrounding floor, enforced only when the line locks onto 50/60 Hz.
+  hum:
+    max_prominence: 15.0
+    freq_tolerance: 0.3
+  # Noise-floor spectral flatness. YouTube audio carries music beds, and a tonal floor is what those look like.
+  flatness:
+    min: 0.0005
+    max: 0.25
+    loudness_threshold: 35.0
+  # Speech from a second speaker, in seconds (pyannote segmentation 3.0). Rejects about 18% of what reaches it:
+  # interviews and panel shows are ordinary YouTube content.
+  multi_speaker:
+    max:
+      second: 0.0                  # 2nd-most-active speaker, overlapping or not
+      overlap: 0.0                 # two speakers at once
+  # NISQA v2.0, 1-5 per dimension. Sidon synthesised everything above ~8 kHz, and nothing in the cascade can tell
+  # restored high frequencies from recorded ones; coloration is the closest thing to a check on it.
+  # A dict-valued key replaces its default wholesale: list every dimension you want gated.
+  nisqa:
+    min:
+      noisiness: 3.0
+      discontinuity: 3.5
+      coloration: 3.25
+      loudness: 3.0
+    max_duration: 50.0
+  # CTC forced alignment of the clip against its Whisper transcript. A loss above max_loss always rejects; above
+  # loss, it rejects only together with a maxrate spike.
+  ctc:
+    uroman: true                   # non-ASCII diacritics shatter into unalignable fragments without it
+    max:
+      loss: 0.7
+      max_loss: 1.0
+      maxrate: 30.0
+      gap_speech: 0.06
+      trail_speech: 0.05
+
+# A recording whose diarised clips are flagged this often is an interview or a panel, and its other clips are not
+# trusted either.
+source_pass:
+  enabled: true
+  max_flag_rate: 0.3               # share of a recording's scored clips the multi-speaker metric may reject
+  min_clips: 3                     # recordings with fewer scored clips are left alone
+
+# ECAPA similarity between 2 s windows of a clip; a clip is dropped at z <= max_z within its duration band.
+speaker_drift:
+  enabled: true
+  max_z: -2.0
+  workers: 4
+
+speaker_fixup:
+  threshold: 0.5                   # fraction of clip pairs that must agree for two videos to be one person
+  linkage: single                  # average, complete, single or weighted
+  clips_per_speaker: 4             # clips embedded per video; every pair of them is compared
+
+select:
+  min_per_speaker: 4               # speakers with fewer clips are left out
+  max_per_speaker: 64              # a speaker with more keeps a random subset
+  max_minutes_per_speaker: null    # optional cap on a speaker's audio, in minutes
+  seed: 0
+
+finalize:
+  move: true                       # move the selected clips out of clips/ instead of copying them
+  zip: true                        # pack audio/ into audio.zip and remove audio/
+  compression: deflate             # deflate (lossless) or stored
+  codecs: []                       # e.g. [higgs] also writes codecs/higgs/<name>.npy
