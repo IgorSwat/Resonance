@@ -158,8 +158,11 @@ def main_preflight(doc: str) -> None:
 def main_stage(name: str, doc: str) -> None:
     """Run one stage alone: on one batch for a batch stage, on the run for a pool stage."""
 
+    from resonance.pipeline import registry
+
     args = parser(doc)
-    args.add_argument("--batch", help="the batch to run a batch stage on, e.g. en001/91")
+    if registry.get(name).scope == "batch":
+        args.add_argument("--batch", required=True, help="the batch to run the stage on, e.g. en001/91")
     args.add_argument("--force", action="store_true", help="run even if the stage is already done")
     if name == "finalize":
         args.add_argument("--restore", action="store_true",
@@ -186,8 +189,6 @@ def main_stage(name: str, doc: str) -> None:
     from resonance.pipeline import gpu
 
     if chain is batch_stages:
-        if not args.batch:
-            sys.exit(style.error(f"{name} is a batch stage: pass --batch, e.g. --batch en001/91"))
         ref = BatchRef.parse(args.batch)
         ctx = Context(config, layout, layout.batch_dir(ref), Reporter(console.handle), ref)
         source = ref

@@ -1,4 +1,5 @@
-"""Which sources are one person: clip-pair agreement between sources, then clustering.
+"""
+Which sources are one person: clip-pair agreement between sources, then clustering.
 
 Sources are compared over their clip pairs rather than as one averaged vector, because a centroid's scale moves
 with the clip count, so a threshold calibrated on one run size is wrong on the next. The clip-pair fraction holds

@@ -1,4 +1,5 @@
-"""The pipeline configuration: one dataclass per section of configs/<pipeline>.yaml.
+"""
+The pipeline configuration: one dataclass per section of configs/<pipeline>.yaml.
 
 Defaults are the values calibrated for YODAS2-Sidon (knowledge/yodas2_sidon.md, knowledge/data_filtering.md).
 """

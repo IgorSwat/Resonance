@@ -10,7 +10,8 @@ CODEBOOKS = 8
 
 
 class HiggsCodec(Codec):
-    """Tokens are stored int16: the codebook is 1024 wide, so the narrower type halves the files losslessly.
+    """
+    HiggsAudio tokernizer v2: 25Hz, 8 codebooks, vocab size 1024 (stored as int16).
 
     Only CUDA reproduces existing tokens; the tokenizer has output channels > 65536, which MPS cannot allocate,
     so anything but CUDA runs on the CPU.

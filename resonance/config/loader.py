@@ -1,4 +1,8 @@
-"""Strict YAML -> Config: an unknown key, a wrong type or a missing file is an error, never a silent default."""
+"""
+Strict YAML -> Config mappings.
+
+An unknown key, a wrong type or a missing file is an error, never a silent default.
+"""
 
 import dataclasses
 import types

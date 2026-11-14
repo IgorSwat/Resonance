@@ -124,3 +124,14 @@ def test_console_logs_progress_without_a_terminal(tmp_path: Path, monkeypatch: p
     log = (tmp_path / "run.log").read_text()
     assert "[w0] en001/train-00091 segment 4/10" in log and "3 clips · 0.50 h · 1m01s" in log
     assert len((tmp_path / "events.jsonl").read_text().splitlines()) == 1
+
+
+def test_no_script_shadows_the_standard_library() -> None:
+    """`python scripts/stages/x.py` puts that folder first on sys.path, so x.py must not be a stdlib name."""
+
+    import sys
+
+    scripts = Path(__file__).parents[1] / "scripts"
+    names = {path.stem for path in scripts.rglob("*.py")}
+    assert not names & set(sys.stdlib_module_names)
+    assert names >= {"run_pipeline", "status", "preflight", "select_clips", "finalize"}
