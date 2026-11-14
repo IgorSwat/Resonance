@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resonance"
+version = "0.2.0"
+description = "Turns YODAS2-Sidon into TTS training data: segment, filter, fix speakers, select, pack."
+requires-python = ">=3.12"
+# torch and torchaudio are left unpinned on purpose: a GPU box ships the build matching its CUDA.
+dependencies = [
+    "faster-whisper",
+    "huggingface_hub",
+    "librosa",
+    "numpy",
+    "pyannote-audio>=4.0",
+    "PyYAML",
+    "requests",
+    "scipy",
+    "soundfile",
+    "speechbrain>=1.0",
+    "torch",
+    "torchaudio",
+    "torchmetrics",
+    "tqdm",
+    "uroman",
+    "verbalis==0.1.1",
+]
+
+[project.optional-dependencies]
+higgs = ["accelerate", "transformers>=5.0"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["resonance*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

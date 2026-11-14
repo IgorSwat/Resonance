@@ -1,86 +1,76 @@
 ---
 name: run-pipeline
-description: Run an existing Resonance corpus pipeline end to end on a GPU box — fetch, segment, filter, speaker fixup, select, and finalize — monitor it, resume it after a failure, and check the output. Use when the user wants more data from a corpus Resonance already supports.
+description: Run the Resonance YODAS2-Sidon pipeline on a GPU box — set up the box, configure the batches, launch, monitor, resume after a failure, and check the output. Use when the user wants more data processed.
 ---
 
-# Run a corpus pipeline
+# Run the pipeline
 
-Corpus runs take hours, fill disks, and fail quietly: a bad worker setting or device turns into silent rejections,
-not crashes. Prepare the box, run in stages you can check, and verify the output before reporting it.
-[corpora.md](corpora.md) has the command sequence for each supported corpus.
+A run takes hours and fills disks. Prepare the box, check the plan with a dry run, launch inside `tmux`, and verify
+the output before reporting it.
 
 ## 1. Plan the run
 
 State to the user before starting:
 
-- **Corpus, language, and range:** which shards or batches, and the expected yield. For example, one English
-  YODAS2-Sidon batch gives about 7,300 utterances (19.7 h), and the filter keeps about half.
-- **Disk:** raw shards plus outputs (see each corpus in [corpora.md](corpora.md)). Raw downloads are the largest item.
-- **Time:** from the throughput figures in [corpora.md](corpora.md).
-- **Selection:** prosody selection (default for most corpora), or ΔCE scoring for YODAS2-Sidon, which needs an Echo
-  checkout.
+- **Batches:** language, shard and range. A shard's batch count differs: English has 34 shards of about 130
+  batches, Polish has one of 38. The preflight check reports each shard's range.
+- **Yield:** one English batch gives about 7,300 clips (20 h) after segmenting, and the filters keep about half.
+- **Disk:** about 1.75 GB per batch for good (clips kept after `discard_rejected`), the same again while
+  `finalize` writes the zip, and up to 3.5 GB per batch in flight. `--dry-run` prints the estimate and warns when
+  the batches don't fit.
+- **Time:** measured figures are in `knowledge/yodas2_sidon.md` §16.
 
 ## 2. Prepare the box
 
-Ask the user which GPU box to use; it changes often. Then:
+Ask the user which box to use. Then, in the checkout:
 
 ```bash
-ssh <box>
-cd <checkout> && git pull
-nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv
-df -h <data disk>
+git pull
+bash scripts/setup.sh         # asks for the HF token once, installs aria2 and the package, caches the models
 ```
 
-- **Environment:** Python 3.12 or later with `requirements.txt` installed. Some stages also need packages that
-  `requirements.txt` misses: `faster_whisper` (YODAS2 segmenter) and `omnivoice` (ParlaSpeech filter).
-- **Access:** `HF_TOKEN` set, with the licences accepted for Emilia and `pyannote/segmentation-3.0`; `aria2c`
-  installed (every fetcher needs it).
-- **Device:** run filters, codecs, and segmentation on CUDA. On a Mac, NISQA scores are wrong (set
-  `nisqa_device: cpu`), the codec falls back to CPU and produces different tokens, and the segmenter doesn't run.
+`setup.sh` ends with the preflight table. Every row must be `ok` or `warning` before a run. The HF account behind
+the token must have accepted the terms of `pyannote/segmentation-3.0`.
 
-## 3. Run it
+## 3. Configure and launch
 
-Start long runs inside `tmux`. For a corpus you haven't run on this box before, run the filter on a small sample
-first (`--limit 50 --verbose`) and check its verdict breakdown against the corpus note; the box, not the code, is
-usually what's wrong.
+Copy `configs/yodas2_sidon.yaml`, set `run.name`, `run.data_root` and `source.batches`, and leave the calibrated
+thresholds alone unless the user asks. Then:
 
-- **YODAS2-Sidon:** `scripts/pipeline/yodas2_sidon.sh` chains every stage but finalize, with resume markers.
-- **Other corpora:** run the stages one by one from [corpora.md](corpora.md), checking each output before the next.
+```bash
+python scripts/run_pipeline.py --config <config> --dry-run      # plan, preflight, disk estimate, what is done
+tmux new -s run
+python scripts/run_pipeline.py --config <config>
+```
 
-Use the worker counts the scripts default to. More workers on one GPU run out of memory, and out-of-memory errors
-inside a metric become silent rejections. Any worker pool that touches CUDA must use a spawn context.
+One key can be overridden without editing the file: `--set resources.gpus=[0]`. `--until <stage>` stops early;
+`--from <stage>` reruns a stage and everything after it.
 
 ## 4. Monitor
 
-- Filters print progress every 200 clips (`i/N clips, rate, accepted %`) and a verdict breakdown at the end. The
-  YODAS2 pipeline logs to `$RUNS/yodas_<lang><shard>_<first>-<last>/run.log`, with one log per step and batch.
-- Watch for:
-  - repeated `<Metric> failed: …` lines (out of memory, CUDA, or cuFFT errors turning into rejections);
-  - `multi_speaker` rejecting nearly everything (a pool forked after CUDA was initialised);
-  - an accepted share far below the corpus note's (wrong config, wrong device, or a bad batch);
-  - "built-in defaults" in a filter's header (the `--config` path is wrong).
-- Stop and tell the user when one of these appears.
+- The terminal shows one progress bar per GPU and a line per finished stage with its counts.
+- `python scripts/status.py --config <config>` prints clips and hours out of every stage for every batch.
+- `<data_root>/runs/<run>/run.log` has the same lines as the terminal plus a progress line per minute;
+  `events.jsonl` has every event as JSON. Raw library output of a stage is in
+  `<data_root>/batches/<shard>/<batch>/logs/<stage>.log`.
+- Stop and tell the user when: a stage fails; the disk warning appears; a batch's accepted share is far from half;
+  or `errors` in a stage summary is not zero.
 
 ## 5. Resume after a failure
 
-- **YODAS2-Sidon:** rerun the same command; finished steps are skipped by their markers. Delete a stale
-  `<batch>.fetch_failed` marker first, or the run aborts at once.
-- **Other corpora:** rerun from the failed stage; fetchers skip shards already on disk.
-- Read the failing step's log before rerunning. Rerunning a deterministic failure only repeats it.
+Read the error in `run.log` first: rerunning a deterministic failure only repeats it. Then run the same command
+again. Finished stages are skipped by their done markers, per batch.
 
 ## 6. Check the output
 
-- The selected CSV parses with the `csv` module in the shared dialect (`|`, `QUOTE_NONE`, `escapechar="\\"`), and its
-  row count matches the audio files and the `codecs/*.npy` files.
-- The finalize report's hours and frame counts match the selection.
-- Hours, speakers, and accepted share are close to the corpus note's figures; a large gap needs an explanation.
+- `<data_root>/runs/<run>/dataset/` holds `<run>.csv` and `audio.zip` (and `codecs/<codec>/` if configured). The
+  CSV's row count equals the number of files in the zip; `finalize` verifies the zip before removing `audio/`.
+- Hours, speakers and the accepted share are close to the figures in `knowledge/yodas2_sidon.md`; a large gap needs
+  an explanation.
 - Ask the user to listen to a sample of the selected clips.
-- Run any `*_prune.py` with `--dry-run` first and show the user what it would delete; it deletes audio, codecs, and
-  CSV rows permanently.
 
 ## Done
 
-The run is done when the selected subset is finalized in `data/processed/<Corpus>/`, the output checks pass, and
-you've reported to the user: the box, the corpus range, the accepted share per stage, the final hours and speakers,
-where the output lives, and anything that went wrong. Record anything new or surprising in the corpus's knowledge
-note.
+The run is done when `finalize` has finished, the checks pass, and you have reported: the box, the batches, clips
+and hours out of each stage, the final hours and speakers, where the dataset lives, and anything that went wrong.
+Record anything new or surprising in `knowledge/yodas2_sidon.md`.

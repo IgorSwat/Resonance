@@ -1,5 +1,12 @@
 # YODAS2-Sidon — what the Spanish batch actually contains
 
+> **2026-11-14:** the pipeline was refactored into the `resonance/` package. §1-§13 are the measurements made with
+> the code before that (git tag `pre-refactor`) and name its scripts. They map onto the stages as follows:
+> `scripts/segment/yodas2_sidon.py` → `segment`; `scripts/filter/yodas2_sidon.py` → `quality`, `source_pass` and
+> `speaker_drift`; `scripts/filter/yodas2_sidon_speaker_fixup.py` → `speaker_fixup`;
+> `scripts/finalize/yodas2_sidon_prune.py` is gone, because `speaker_drift` runs on every batch. §14 and §17 were
+> moved here from the Emilia note when that corpus was removed. §15 and §16 measure the refactored pipeline.
+
 Measured on `data/YODAS2-sidon/train-00000` (Spanish, one shard of the 1108 under
 `sarulab-speech/yodas2_sidon`): 208 videos, 36.7 h, 43,821 utterances, 2.8 GB. Sample sizes are
 given because several are small.
@@ -288,3 +295,179 @@ A single unusable chunk out of 148,545 must not cost the hours behind it. So:
 
 Every one of these reports the chunk through the filter's existing `failures` counter, so a run
 that quietly starts failing everything is still visible in the summary.
+
+## 14. What detects a second voice inside a clip, and what does not
+
+Measured on Emilia EN (batches `en-b000000` and `en-b000007`) before that corpus was removed from the repo; kept
+because the `speaker_drift` stage rests on it. Recorded so the failed approaches are not tried again.
+
+| approach | result |
+|---|---|
+| Metadata (`dnsmos`, duration, text) | Nothing: the ASR transcribes both speakers inline |
+| CTC `gap_speech` / `trail_speech` | Only catches an intruder the ASR dropped (a backchannel) |
+| WavLM x-vector windows against a speaker anchor | **AUC 0.655 on unbiased clips** (0.828 on a score-selected set; the gap is selection bias) |
+| Shorter windows for the above | Monotonically worse: 0.75 s 0.715, 1.0 s 0.730, 1.5 s 0.749, 2.0 s 0.801 |
+| A classifier fitted on the two scores | Leave-one-out 0.766, worse than the unfitted product 0.818, on about 40 points |
+| F0 shift across the clip | Disagreed with the listener on 4 of 12 clips: it tracks intonation, not identity |
+| `pyannote/speaker-diarization-3.1`, full pipeline | 1 of 7 ear-confirmed clips: segmentation emits no second speaker for clustering to find |
+
+**The anchorless, duration-normalised variant works at the tail.** `resonance/metrics/speaker_drift.py` scores the
+minimum pairwise cosine between ECAPA windows of 2 s, with no speaker anchor, and the `speaker_drift` stage ranks it
+by z within a duration band (`resonance/metrics/banding.py`). On 500 random Emilia clips that had already passed
+the multi-speaker metric, the 10 lowest-z clips were labelled by ear: **7 confirmed multi-speaker** (p < 0.02 against
+a 1/3 base rate).
+
+Two properties carry it, and both were absent from the x-vector attempt:
+
+- **No anchor** to average the intrusion away.
+- **The duration control.** Raw similarity correlates -0.574 with clip length (more window pairs, lower minimum), so
+  an unnormalised threshold is mostly a long-clip filter.
+
+It is measured only as precision at the extreme tail. Recall is unknown. The score is unimodal, so there is no
+valley to put a threshold in; z ≤ -2 is an outlier cut.
+
+## 15. The refactored pipeline reproduces the old one
+
+Measured on 2026-11-14 on a 2x RTX 4090 box (256 cores, torch 2.11.0+cu128), batch `en001/train-00091` (251
+recordings, 37.1 h read) and a 40-recording subset of it. The old code is tag `pre-refactor`; the new code is
+branch `refactor/pipeline`. Both were run on the same segments for the filter comparison. The comparison scripts
+(`golden.sh`, `parity.py`, `compare.py`) lived on the box, outside the repo.
+
+**The filters are identical clip for clip.**
+
+| | 40 recordings | full batch |
+|---|---|---|
+| clips into the cascade | 811 | 5,948 |
+| cascade verdicts identical, old vs new | 811 (100%) | 5,948 (100%) |
+| clips kept after cascade, source pass and drift | 443 = 443, same clips | 3,221 = 3,221, same clips |
+| largest drift-similarity difference | 5.0e-7 | 5.0e-7 |
+| speaker IDs identical after fixup | 443 of 443 | 3,221 of 3,221 |
+
+The old filter is itself deterministic: two runs of it gave identical verdicts on all 811 clips.
+
+**Higgs codec tokens are identical**, on 40 of 40 clips of the 40-recording run (`finalize.codecs: [higgs]`
+against the old `tools/codec/higgs.py`). The codec needs `pip install .[higgs]`, which adds `transformers` and
+`accelerate`.
+
+**The segmenter is identical when the thread caps match.** With `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`,
+`MKL_NUM_THREADS` and `NUMBA_NUM_THREADS` set to 4, the old segmenter produced exactly the new one's output on the
+40 recordings: 811 of 811 clip names and transcripts. The old segmenter is also deterministic across runs and
+across the two GPUs.
+
+**The thread caps themselves change about 2% of the clips.** The new pipeline caps every worker's thread pools
+(`resources.threads_per_worker`), which the old one did not. Old without caps against new with caps:
+
+| | 40 recordings | full batch |
+|---|---|---|
+| clips, old / new | 811 / 811 | 5,940 / 5,948 |
+| same recording, start and end | 809 | 5,900 (99.3%) |
+| of those, same transcript | 800 | 5,797 (98.3%) |
+
+Of the 103 differing transcripts on the full batch, 41 differ only in punctuation or case and 28 in one word. Neither
+side is the correct one: thread count changes floating-point summation order in the feature computation, and beam
+search amplifies it. The caps stay, because without them every worker starts one BLAS thread per core and a 256-core
+box runs into its process limit.
+
+### ⚑ Two settings the parity depends on
+
+- **Quality workers set `torch.set_float32_matmul_precision("high")`** (`resonance/stages/quality.py`). `import
+  speechbrain` switches TF32 matmuls on, and the old filter imported it in every worker for the drift metric, so
+  every threshold in the config was calibrated with TF32. Without the explicit setting, 3 of 811 clips changed
+  verdict, all on a CTC bound (for example `trail_speech` 0.0501 against a bound of 0.05).
+- **Clip names carry a per-recording index**, so one changed boundary renames every later clip of that recording.
+  Compare segmentations by recording, start and end, never by name: by name the full batch looked 90.6% identical
+  when it was 99.3%.
+
+## 16. Speed and disk of the refactored pipeline
+
+Same box and date as §15. Config `configs/yodas2_sidon.yaml` defaults unless noted.
+
+**One batch on one RTX 4090** (`en001/train-00091`, 5,948 clips segmented, 3,221 kept):
+
+| stage | old | new |
+|---|---|---|
+| segment | 447 s | 418 s with 8 prep workers, 380 s with 24, **274 s with 24 and 3 Whisper loops** |
+| filters | 168 s (cascade, source pass, drift) | 144 s quality + 20 s speaker_drift |
+| speaker fixup | 19.5 s | 14 s |
+| select, finalize (2,815 clips, deflate zip) | not part of the old driver | 61 s |
+
+**Whisper is the bottleneck.** Of the 417 s of segmenting, Whisper takes 327 s. Read, resample and VAD run in the
+prep workers; with 8 of them the GPU loop waited 60 s for audio, with 24 it waited 21 s. Both runs produced the same
+5,948 clips and transcripts.
+
+**A larger Whisper batch does not help.** One GPU, 24 prep workers:
+
+| `segment.batch_size` | Whisper | whole stage | clips |
+|---|---|---|---|
+| **16 (default)** | **328 s** | **379 s** | 5,948 |
+| 32 | 330 s | 382 s | 5,925 |
+| 64 | 334 s | 389 s | 5,926 |
+
+The time does not move, and the output does: a different batch changes which windows are decoded together. The
+default stays at 16.
+
+**Several Whisper loops per GPU do help, with identical output.** One loop leaves the GPU at 63%: the Python loop
+around Whisper is the limit, not the GPU. `segment.workers` runs that many loops on one GPU, each a process with its
+own model and its own share of the batch's recordings. Same batch, 24 prep workers in total:
+
+| `segment.workers` | segment stage | GPU utilisation | GPU memory |
+|---|---|---|---|
+| 1 | 390 s | 63% | 4.6 GB |
+| 2 | 295 s | 82% | 9.2 GB |
+| **3 (default)** | **274 s (-30%)** | 92% | 13.1 GB |
+| 4 | 263 s | 97% | 18.4 GB |
+| 6 | CUDA out of memory on 24 GB | | |
+
+`segment.csv` is byte-identical for 1, 2, 3 and 4 loops (5,948 clips). The default is 3: 4 is 4% faster and leaves
+about 5 GB free on a 24 GB card.
+
+**Confirmed end to end:** the same four batches (`00092` to `00095`) on both GPUs with `segment.workers: 3` and
+`cpu_workers: 24` took 17.3 min for the batch stages, 4.3 min per batch, against 21.5 min before, with the same
+14,799 kept and 10,917 selected clips. With both GPUs busy a batch segments in 4.6-5.5 min, slower than the 274 s
+measured on one GPU alone.
+
+⚑ When a loop fails, its helper processes must die with it. The 6-loop run first hung forever: the other loops were
+terminated, their prep workers were orphaned, and Python's exit waited on them. `gpu.map_gpus` now gives each shard
+its own process group and kills the group; the same run then failed in 32 s with the out-of-memory error.
+
+**Four batches on both GPUs, download to `audio.zip`** (`en001/train-00092` to `00095`, 16 prep workers per GPU):
+
+| | |
+|---|---|
+| wall time, whole run | **25.8 min** (1,548 s) |
+| batch stages for the 4 batches | 21.5 min, so 5.4 min per batch (old: about 10.3 min per batch on one GPU) |
+| per batch on its GPU | segment 6.7-7.4 min, quality 2.4-2.8 min, speaker_drift 20-24 s |
+| clips | 27,455 segmented (72.6 h), 14,799 kept (38.5 h, 54%), 10,917 selected (28.6 h) |
+| speakers | 509 video IDs, 473 after fixup (largest cluster 8), 406 after select |
+| speaker_fixup, select, finalize | 18 s, under 1 s, 3 min 51 s |
+| errors | 0 in every stage |
+
+Per GPU the throughput is what it was. The gain is that both GPUs are used without splitting the batches by hand.
+
+**Disk.**
+
+- `discard_rejected` freed 1.2-1.7 GB per batch (2,700-4,000 wavs).
+- After the run, `clips/` held 1.7 GB (the 3,882 kept clips that select left out) and the dataset 3.75 GB.
+- **Deflate saves about 19%:** the 10,917 selected wavs are 4.60 GB and `audio.zip` is 3.74 GB.
+
+**`scripts/setup.sh` on a clean HF cache** took 72 s: pip install, six model downloads (1.7 GB in the HF cache) and
+the preflight checks.
+
+## 17. Linking the same person across videos
+
+Measured on Emilia EN (634 speakers with at least 4 clips, 200,661 pairs) before that corpus was removed; kept
+because `speaker_fixup` rests on it.
+
+- **Use `pyannote/wespeaker-voxceleb-resnet34-LM`**: 256-d, about 0.017 s per clip, whole clips truncated to 8 s.
+  Within-speaker cosine (same source, split halves) has median 0.869 and p5 0.728; between-speaker has median 0.092
+  and p99 0.835.
+- **Do not use `microsoft/wavlm-base-plus-sv` for this.** Its between-speaker median is 0.71 with p99 0.984, so it
+  links 3% of all pairs at 0.95 or above.
+- **Compare sources over clip pairs, not centroids.** A centroid's cosine ceiling moves with the clip count: over 15
+  unrelated sources it climbs 0.735 (1 clip), 0.869 (4), 0.917 (16), and overtakes true matches from 3 clips up, so a
+  threshold calibrated at one run size is wrong at the next. The share of clip pairs above cosine 0.75 holds still:
+  60-64 merges whether 1 or 4 clips are sampled. This is what `resonance/speakers/clustering.py` does.
+- **A clip pair at 0.95 or above is duplicated audio**, not a speaker link. `merges.csv` flags it.
+- **Run it over many batches.** Ten random recordings rarely share a host (§11); four batches merged 36 of 509
+  video IDs (§16).
+

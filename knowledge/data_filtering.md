@@ -49,7 +49,7 @@ def zero_run_ms(y, sr):  # longest digital dropout
 
 ### 1.0 Noise-floor spectral flatness — calibration
 
-`tools/metrics/spectral_flatness.py` scores the geometric/arithmetic mean ratio of the power
+`resonance/metrics/spectral_flatness.py` scores the geometric/arithmetic mean ratio of the power
 spectrum over the quietest 10% of frames (median across those frames).
 
 **The ceiling is 0.56, not 1.0.** A single-frame periodogram of white noise has exponentially
@@ -146,7 +146,7 @@ content-dependent rolloff and a high floor (−14 to −30 dB) — genuinely ful
 `output.wav` in the repo root falls −43 → −51 → −66 → −81 dB and sits dead flat at −82 dB from
 15 kHz up — textbook lossy brickwall.
 
-**Reproduction note (`tools/metrics/effective_bandwidth.py`, 50 random files/corpus).** The
+**Reproduction note (`resonance/metrics/effective_bandwidth.py`, 50 random files/corpus).** The
 ±0.2 kHz agreement above does not hold over a random sample — the four files it was measured on
 were not representative. Measured cutoffs: LibriSpeech 9.08 ± 1.62 kHz (frac 0.757 ± 0.135, range
 0.33–0.91), LJSpeech 9.53 ± 0.62 kHz (frac 0.864 ± 0.056, range 0.73–0.93). The corpora still
@@ -178,7 +178,7 @@ Three follow-up findings that change how this metric should be read:
    8.37 kHz, −93), 6188 (73024 at 8.42 kHz, −94). The rest are band-limited over a *live* floor
    (−60…−85 dB) — dull sources, not digital walls. 6120 ch 56179 is a third case: a dead band
    (−95.5 dB) walled at 10.9 kHz, i.e. a lossy codec rather than a resample.
-3. **The floor-relative cliff detector above was replaced** (`tools/metrics/effective_bandwidth.py`).
+3. **The floor-relative cliff detector above was replaced** (`resonance/metrics/effective_bandwidth.py`).
    Thresholding against the file's own >0.9·Nyquist floor makes the score non-monotone in true
    bandwidth: perfectly full-band AM white noise scored `frac` 0.00, pink AM noise 0.37, and the
    same pink noise hard-lowpassed at 8 kHz scored 0.68 — the band-limited signal beat both
