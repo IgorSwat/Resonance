@@ -24,6 +24,7 @@ from resonance.config.schema import Config
 from resonance.io import manifest
 from resonance.io.audio import read_audio
 from resonance.io.manifest import Row
+from resonance.log.events import Progress
 from resonance.pipeline import gpu, state
 from resonance.pipeline.artifacts import ClipManifest, Dataset, Layout
 from resonance.pipeline.stage import Context, Stage
@@ -100,7 +101,7 @@ class Finalize(Stage):
         return self.output(ctx)
 
     @staticmethod
-    def _zip(audio: Path, rows: list[Row], target: Path, compression: int, progress) -> int:
+    def _zip(audio: Path, rows: list[Row], target: Path, compression: int, progress: Progress) -> int:
         """Zip audio/ and remove it, but only after the zip has been read back whole."""
 
         temporary = target.with_name(target.name + ".tmp")

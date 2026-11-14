@@ -23,7 +23,7 @@ class Event:
 class Progress:
     """Within-stage progress, sent as throttled events; the Console owns the tqdm bar."""
 
-    def __init__(self, reporter: "Reporter", total: int):
+    def __init__(self, reporter: "Reporter", total: int) -> None:
         self.reporter, self.total = reporter, total
         self.pending, self.sent = 0, 0.0
         reporter.emit("progress", total=total)
@@ -42,7 +42,7 @@ class Progress:
 class Reporter:
     """A stage's handle on the log. `sink` is a queue's put in a worker, or the Console itself in-process."""
 
-    def __init__(self, sink: Callable[[Event], None], worker: int | None = None):
+    def __init__(self, sink: Callable[[Event], None], worker: int | None = None) -> None:
         self.sink, self.worker = sink, worker
         self.batch: str | None = None
         self.stage: str | None = None

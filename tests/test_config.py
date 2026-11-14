@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from resonance.config import loader
@@ -6,13 +8,13 @@ from resonance.config.schema import Config
 BASE = "run: {name: t}\nsource: {language: en, batches: [{shard: '001', first: 0, last: 2}]}\n"
 
 
-def write(tmp_path, text: str):
+def write(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "c.yaml"
     path.write_text(text)
     return path
 
 
-def test_defaults_and_overrides(tmp_path):
+def test_defaults_and_overrides(tmp_path: Path) -> None:
     config = loader.load(write(tmp_path, BASE), ["quality.workers=3", "quality.nisqa.min={mos: 3.5}",
                                                   "select.max_minutes_per_speaker=30"])
     assert isinstance(config, Config)
@@ -21,7 +23,7 @@ def test_defaults_and_overrides(tmp_path):
     assert config.source.batches[0].shard == "001" and config.segment.target_duration == 8.0
 
 
-def test_roundtrip(tmp_path):
+def test_roundtrip(tmp_path: Path) -> None:
     config = loader.load(write(tmp_path, BASE))
     assert loader.load(write(tmp_path, loader.dump(config))) == config
 
@@ -33,21 +35,19 @@ def test_roundtrip(tmp_path):
     (BASE.replace("'001'", "1"), "source.batches[0].shard"),
     (BASE + "finalize: {zip: 1}\n", "finalize.zip"),
 ])
-def test_strict(tmp_path, text, message):
+def test_strict(tmp_path: Path, text: str, message: str) -> None:
     with pytest.raises(loader.ConfigError, match=message.replace("(", r"\(").replace(")", r"\)").replace("[", r"\[").replace("]", r"\]")):
         loader.load(write(tmp_path, text))
 
 
-def test_missing_file_and_bad_override(tmp_path):
+def test_missing_file_and_bad_override(tmp_path: Path) -> None:
     with pytest.raises(loader.ConfigError, match="No config file"):
         loader.load(tmp_path / "absent.yaml")
     with pytest.raises(loader.ConfigError, match="not key=value"):
         loader.load(write(tmp_path, BASE), ["quality.workers"])
 
 
-def test_shipped_config_loads():
-    from pathlib import Path
-
+def test_shipped_config_loads() -> None:
     path = Path(__file__).parents[1] / "configs/yodas2_sidon.yaml"
     config = loader.load(path)
     # the shipped file states the defaults, so removing every optional key must change nothing

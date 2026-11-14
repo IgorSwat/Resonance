@@ -1,6 +1,7 @@
 import itertools
 
 import numpy as np
+import pytest
 
 from resonance.speakers import clustering
 
@@ -29,7 +30,7 @@ def population(seed: int = 0) -> dict[str, np.ndarray]:
     return embeddings
 
 
-def test_compare_matches_the_pairwise_loop(monkeypatch):
+def test_compare_matches_the_pairwise_loop(monkeypatch: pytest.MonkeyPatch) -> None:
     embeddings = population()
     expected = reference(embeddings)
     for block in (1 << 30, 4096):       # one block, then many small ones
@@ -38,7 +39,7 @@ def test_compare_matches_the_pairwise_loop(monkeypatch):
         assert np.allclose(agreement, expected[0]) and np.allclose(closest, expected[1], atol=1e-6)
 
 
-def test_merge_map_groups_the_same_person():
+def test_merge_map_groups_the_same_person() -> None:
     embeddings = population()
     agreement, _ = clustering.compare(embeddings)
     merges = clustering.merge_map(sorted(embeddings), agreement, threshold=0.5)

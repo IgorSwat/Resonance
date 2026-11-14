@@ -56,7 +56,7 @@ class Stage(abc.ABC):
     provides: ClassVar[tuple[str, ...]] = ()
     needs: ClassVar[tuple[str, ...]] = ()
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         self.config = config
 
     @classmethod

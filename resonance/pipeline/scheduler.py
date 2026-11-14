@@ -2,6 +2,8 @@
 and one downloader thread feeding it."""
 
 import multiprocessing
+import multiprocessing.queues
+import multiprocessing.synchronize
 import queue
 import threading
 import traceback
@@ -18,7 +20,7 @@ from resonance.pipeline.stage import Context, Stage
 
 class Scheduler:
     def __init__(self, config: Config, stages: Sequence[type[Stage]], refs: Sequence[BatchRef],
-                 gpus: Sequence[int | None], console: Console):
+                 gpus: Sequence[int | None], console: Console) -> None:
         self.config, self.stages, self.refs, self.gpus, self.console = config, list(stages), list(refs), gpus, console
         self.layout = Layout(config)
         # The leading stages that need no GPU (fetch) run in the downloader thread, ahead of the workers.
@@ -70,8 +72,8 @@ class Scheduler:
         return Context(self.config, self.layout, self.layout.batch_dir(ref),
                        reporter or Reporter(lambda event: None), ref)
 
-    def _feed(self, pending: Sequence[BatchRef], instances: Sequence[Stage], tasks, events, stop,
-              workers: int) -> None:
+    def _feed(self, pending: Sequence[BatchRef], instances: Sequence[Stage], tasks: multiprocessing.queues.Queue,
+              events: multiprocessing.queues.Queue, stop: multiprocessing.synchronize.Event, workers: int) -> None:
         """Run the head stages for each batch, at most fetch_ahead batches ahead of the GPUs, and queue it."""
 
         reporter = Reporter(events.put)
@@ -100,8 +102,9 @@ class Scheduler:
                 tasks.put(None)
 
 
-def _worker(slot: int, device: int | None, config: Config, classes: Sequence[type[Stage]], tasks, events,
-            stop) -> None:
+def _worker(slot: int, device: int | None, config: Config, classes: Sequence[type[Stage]],
+            tasks: multiprocessing.queues.Queue, events: multiprocessing.queues.Queue,
+            stop: multiprocessing.synchronize.Event) -> None:
     """One GPU's loop: take a batch, run every stage it still needs, report."""
 
     reporter = Reporter(events.put, worker=slot)

@@ -49,7 +49,7 @@ def build(name: str, config: QualityConfig) -> tuple[Metric, Any]:
 
 
 class Cascade:
-    def __init__(self, config: QualityConfig):
+    def __init__(self, config: QualityConfig) -> None:
         self.config = config
         self.stages = [(name, *build(name, config)) for name in config.metrics]
 

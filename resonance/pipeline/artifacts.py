@@ -55,7 +55,7 @@ class Dataset:
 class Layout:
     """Every path of a run, derived from run.data_root."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         self.root = config.run.data_root
         self.run_dir = self.root / "runs" / config.run.name
         self.dataset = self.run_dir / "dataset"

@@ -26,7 +26,7 @@ class SpeakerDriftMetric(Metric):
     Silent windows are dropped rather than embedded: ECAPA maps near-silence to an arbitrary
     point far from any voice, which alone would drive the score for every clip with a pause.
 
-    Read knowledge/emilia.md §3 before relying on this: windowed speaker embeddings against a
+    Read knowledge/yodas2_sidon.md §14 before relying on this: windowed speaker embeddings against a
     speaker anchor were already measured there at AUC 0.655 on unbiased Emilia clips. The 2 s
     window is the longest of the four tried there and the best of them (0.801 vs 0.715 at
     0.75 s) — embedding quality degrades faster than short intrusions are recovered.

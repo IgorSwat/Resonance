@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from resonance.io import manifest
 
 
-def test_roundtrip_keeps_awkward_text(tmp_path):
+def test_roundtrip_keeps_awkward_text(tmp_path: Path) -> None:
     rows = [{"dataset": "d", "name": "a", "transcription": "pipe | here, \"quotes\" and a bare \r return\\",
              "speaker_id": "s", "language": "en", "duration": "3.5", "audio_path": "clips/a.wav", "source_id": "s"},
             {"dataset": "d", "name": "b", "transcription": "Plain.", "speaker_id": "s", "language": "en",
@@ -13,7 +15,7 @@ def test_roundtrip_keeps_awkward_text(tmp_path):
     assert manifest.hours(rows) == 5 / 3600
 
 
-def test_standard_columns_only(tmp_path):
+def test_standard_columns_only(tmp_path: Path) -> None:
     row = dict.fromkeys(manifest.COLUMNS, "x")
     manifest.write(tmp_path / "m.csv", [row], manifest.STANDARD)
     assert list(manifest.read(tmp_path / "m.csv")[0]) == list(manifest.STANDARD)

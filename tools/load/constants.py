@@ -1,5 +1,0 @@
-AUDIO_EXTENSIONS = (".mp3", ".wav")
-
-DEFAULT_BUFFER_SIZE = 1024
-
-AUDIO_FIELD = "audio"

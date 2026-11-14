@@ -1,5 +1,6 @@
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -18,7 +19,7 @@ STAGES = [fakes.FakeFetch, fakes.FakeSegment, fakes.FakeQuality, DiscardRejected
 KEPT = fakes.SOURCES * (fakes.CLIPS_PER_SOURCE - 1)
 
 
-def test_validate_checks_types_order_and_side_files():
+def test_validate_checks_types_order_and_side_files() -> None:
     batch, pool = runner.validate(STAGES)
     assert [cls.name for cls in batch] == ["fetch", "segment", "quality", "discard_rejected"] and len(pool) == 3
     with pytest.raises(runner.PipelineError, match="quality consumes ClipManifest, but it would be given RawBatch"):
@@ -31,12 +32,12 @@ def test_validate_checks_types_order_and_side_files():
         runner.validate([fakes.FakeFetch, fakes.FakeSegment, Select])
 
 
-def test_batch_ref_parse():
+def test_batch_ref_parse() -> None:
     assert BatchRef.parse("en001/91") == BatchRef("en", "001", 91) == BatchRef.parse("en001/train-00091")
     assert BatchRef("en", "001", 91).key == "en001/train-00091"
 
 
-def test_whole_pipeline_on_two_fake_gpus(tmp_path, monkeypatch):
+def test_whole_pipeline_on_two_fake_gpus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gpu, "discover", lambda requested: [0, 1])
     config = fakes.config(tmp_path, 0, 3)
     layout = Layout(config)
@@ -76,7 +77,7 @@ def test_whole_pipeline_on_two_fake_gpus(tmp_path, monkeypatch):
     assert (layout.dataset / "audio.zip").exists()
 
 
-def test_failure_stops_the_run_and_resume_finishes_it(tmp_path, monkeypatch):
+def test_failure_stops_the_run_and_resume_finishes_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gpu, "discover", lambda requested: [0])
     config = fakes.config(tmp_path, 0, 2, **{"finalize.move": "false", "finalize.zip": "false"})
     layout = Layout(config)
@@ -97,7 +98,7 @@ def test_failure_stops_the_run_and_resume_finishes_it(tmp_path, monkeypatch):
     assert not list(layout.root.glob("batches/*/*/consumed.json"))
 
 
-def test_until_stops_before_pool_stages(tmp_path, monkeypatch):
+def test_until_stops_before_pool_stages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gpu, "discover", lambda requested: [None])
     config = fakes.config(tmp_path, 0, 0)
     assert runner.run(config, Console(), until="quality", classes=STAGES)
@@ -107,7 +108,7 @@ def test_until_stops_before_pool_stages(tmp_path, monkeypatch):
     assert not state.done(layout.run_dir, "merge")
 
 
-def test_console_logs_progress_without_a_terminal(tmp_path, monkeypatch):
+def test_console_logs_progress_without_a_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from resonance.log import console as console_module
     from resonance.log.events import Reporter
 

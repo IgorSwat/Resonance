@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -15,7 +16,7 @@ from resonance.pipeline.stage import Context, Stage
 CLIPS_PER_SOURCE, SOURCES = 6, 3
 
 
-def config(tmp_path, first: int = 0, last: int = 1, **overrides: object) -> Config:
+def config(tmp_path: Path, first: int = 0, last: int = 1, **overrides: object) -> Config:
     path = tmp_path / "config.yaml"
     path.write_text(f"run: {{name: test, data_root: {tmp_path / 'data'}}}\n"
                     f"source: {{language: en, batches: [{{shard: '000', first: {first}, last: {last}}}]}}\n")

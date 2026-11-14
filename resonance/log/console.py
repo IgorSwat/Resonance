@@ -16,7 +16,7 @@ HEARTBEAT = 60.0            # seconds between progress lines in run.log, where n
 
 
 class Console:
-    def __init__(self, run_dir: Path | None = None, total_batches: int = 0):
+    def __init__(self, run_dir: Path | None = None, total_batches: int = 0) -> None:
         self.bars: dict[int | None, tqdm] = {}
         self.beats: dict[int | None, list] = {}
         self.interactive = sys.stderr.isatty()

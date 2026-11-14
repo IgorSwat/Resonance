@@ -23,7 +23,7 @@ def load(model: str) -> Any:
     from faster_whisper import BatchedInferencePipeline, WhisperModel
 
     class Pipeline(BatchedInferencePipeline):
-        def generate_segment_batched(self, features, tokenizer, options):
+        def generate_segment_batched(self, features: Any, tokenizer: Any, options: Any) -> tuple[Any, Any]:
             encoder_output, output = super().generate_segment_batched(features, tokenizer, options)
             self.languages.extend(probabilities[0][0].strip("<|>")
                                   for probabilities in self.model.model.detect_language(encoder_output))
