@@ -14,6 +14,7 @@ DIALECT = {"delimiter": "|", "quotechar": None, "quoting": csv.QUOTE_NONE, "esca
 STANDARD = ("dataset", "name", "transcription", "speaker_id", "language")
 EXTRA = ("duration", "audio_path", "source_id")
 COLUMNS = STANDARD + EXTRA
+NORMALIZED = "transcription_normalized"    # optional; written beside the transcription whenever the rows carry it
 
 Row = dict[str, str]
 
@@ -23,8 +24,22 @@ def read(path: Path) -> list[Row]:
         return list(csv.DictReader(handle, **DIALECT))
 
 
-def write(path: Path, rows: Iterable[Row], columns: Sequence[str] = COLUMNS) -> None:
-    """Written to a temporary file and renamed, so a crash never leaves half a manifest."""
+def columns_of(rows: Sequence[Row], base: Sequence[str]) -> list[str]:
+    """`base`, with the normalized transcript placed after the transcription when the rows have one."""
+
+    columns = list(base)
+    if rows and NORMALIZED in rows[0] and NORMALIZED not in columns:
+        columns.insert(columns.index("transcription") + 1, NORMALIZED)
+    return columns
+
+
+def write(path: Path, rows: Sequence[Row], columns: Sequence[str] | None = None) -> None:
+    """
+    Written to a temporary file and renamed, so a crash never leaves half a manifest. Without `columns` it writes
+    the pipeline's own: COLUMNS, plus the normalized transcript when present.
+    """
+
+    columns = columns_of(rows, COLUMNS) if columns is None else columns
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")

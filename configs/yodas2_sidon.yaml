@@ -1,12 +1,4 @@
-# The YODAS2-Sidon pipeline. Every key is optional except run.name and source; the values below are the defaults
-# (resonance/config/schema.py). An unknown key is an error. Override one key from the command line with
-#   --set quality.nisqa.min.noisiness=3.2
-#
-# YODAS2-Sidon is YouTube speech restored by the Sidon model and resampled to 24 kHz. The restoration is genuine:
-# content reaches the full 12 kHz Nyquist on 96% of clips, so the audio is judged as delivered. What the corpus
-# lacks is a usable transcript: its captions carry punctuation on 0.1% of utterances. The segment stage cuts
-# sentence-aligned utterances and transcribes them with Whisper, and the filters judge those
-# (knowledge/yodas2_sidon.md).
+# The YODAS2-Sidon pipeline.
 
 run:
   name: en001_91
@@ -32,7 +24,7 @@ disk:                              # used only for the disk warning
 # The stages, in order. Remove a name to skip that stage; source_pass and speaker_drift can also be switched off
 # below. Batch stages (up to discard_rejected) run once per batch, the rest once over all batches.
 pipeline: [fetch, segment, quality, source_pass, speaker_drift, discard_rejected,
-           merge, speaker_fixup, select, finalize]
+           merge, transcript_fixup, speaker_fixup, select, finalize]
 
 segment:
   whisper: large-v3-turbo          # faster-whisper model name
@@ -60,14 +52,11 @@ quality:
   workers: 6                       # processes per GPU, each holding every model; the GPU saturates by 6, and at
                                    # 10 a 24 GB card runs out of memory
   max_error_rate: 0.01             # the stage stops when more than this share of its clips raise an error
-
-  # Fraction of Nyquist still carrying speech. Sidon's output passes this easily; kept because it costs
-  # microseconds and would catch a shard that skipped restoration.
+  # Fraction of Nyquist still carrying speech.
   bandwidth:
     min_frac: 0.85
     band_hz: 1000.0
-    cliff_db: 20.0                 # a band counts as speech-bearing only if it does not cliff more than this
-                                   # against the band below it
+    cliff_db: 20.0
   # Fraction of samples lost to clipping, counted over runs of >= 3 rather than single samples.
   clipping:
     max_ratio: 0.0001
@@ -80,15 +69,12 @@ quality:
     min: 0.0005
     max: 0.25
     loudness_threshold: 35.0
-  # Speech from a second speaker, in seconds (pyannote segmentation 3.0). Rejects about 18% of what reaches it:
-  # interviews and panel shows are ordinary YouTube content.
+  # Speech from a second speaker, in seconds (pyannote segmentation 3.0).
   multi_speaker:
     max:
       second: 0.0                  # 2nd-most-active speaker, overlapping or not
       overlap: 0.0                 # two speakers at once
-  # NISQA v2.0, 1-5 per dimension. Sidon synthesised everything above ~8 kHz, and nothing in the cascade can tell
-  # restored high frequencies from recorded ones; coloration is the closest thing to a check on it.
-  # A dict-valued key replaces its default wholesale: list every dimension you want gated.
+  # NISQA v2.0, 1-5 per dimension.
   nisqa:
     min:
       noisiness: 3.0
@@ -96,8 +82,7 @@ quality:
       coloration: 3.25
       loudness: 3.0
     max_duration: 50.0
-  # CTC forced alignment of the clip against its Whisper transcript. A loss above max_loss always rejects; above
-  # loss, it rejects only together with a maxrate spike.
+  # CTC forced alignment of the clip against its Whisper transcript.
   ctc:
     uroman: true                   # non-ASCII diacritics shatter into unalignable fragments without it
     max:
@@ -119,6 +104,16 @@ speaker_drift:
   enabled: true
   max_z: -2.0
   workers: 4
+
+# Adds the transcription_normalized column (Verbalis). 
+# A clip with a number stays only if Whisper, made to spell numbers out, reads it the way Verbalis does.
+transcript_fixup:
+  whisper: large-v3-turbo
+  beam_size: 5
+  workers: 3                       # Whisper loops per GPU
+  normalize: true                  # one form for quotes, apostrophes, dashes, ellipses
+  trim: true                       # single spaces, none before punctuation
+  terms: true                      # abbreviations and web addresses as words
 
 speaker_fixup:
   threshold: 0.5                   # fraction of clip pairs that must agree for two videos to be one person

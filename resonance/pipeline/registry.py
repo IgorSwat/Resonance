@@ -12,6 +12,7 @@ STAGES = {
     "speaker_drift": "resonance.stages.speaker_drift:SpeakerDrift",
     "discard_rejected": "resonance.stages.discard_rejected:DiscardRejected",
     "merge": "resonance.stages.merge:Merge",
+    "transcript_fixup": "resonance.stages.transcript_fixup:TranscriptFixup",
     "speaker_fixup": "resonance.stages.speaker_fixup:SpeakerFixup",
     "select": "resonance.stages.select:Select",
     "finalize": "resonance.stages.finalize:Finalize",

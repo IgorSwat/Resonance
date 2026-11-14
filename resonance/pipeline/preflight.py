@@ -17,6 +17,7 @@ MODULES = {
     "nisqa": ("torchmetrics", "librosa"),
     "ctc": ("torchaudio", "uroman"),
     "speaker_drift": ("speechbrain",),
+    "transcript_fixup": ("faster_whisper", "verbalis"),
     "speaker_fixup": ("pyannote.audio", "scipy", "librosa"),
     "higgs": ("transformers", "accelerate"),
 }
@@ -59,8 +60,9 @@ def download_models(config: Config, report: Callable[[str], None]) -> None:
     """
 
     parts, steps = _parts(config), []
-    if "segment" in parts:
-        steps.append((f"whisper {config.segment.whisper}", _whisper(config.segment.whisper)))
+    models = ({config.segment.whisper} if "segment" in parts else set()) | (
+        {config.transcript_fixup.whisper} if "transcript_fixup" in parts else set())
+    steps += [(f"whisper {model}", _whisper(model)) for model in sorted(models)]
     if "multi_speaker" in parts:
         steps.append((GATED["multi_speaker"], _pyannote_model))
     if "nisqa" in parts:

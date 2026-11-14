@@ -24,6 +24,7 @@ dependencies = [
     "torchmetrics",
     "tqdm",
     "uroman",
+    "verbalis==0.1.1",
 ]
 
 [project.optional-dependencies]

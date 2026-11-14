@@ -135,6 +135,16 @@ class SpeakerDriftConfig:
 
 
 @dataclass
+class TranscriptFixupConfig:
+    whisper: str = "large-v3-turbo"
+    beam_size: int = 5
+    workers: int = 3
+    normalize: bool = True
+    trim: bool = True
+    terms: bool = True
+
+
+@dataclass
 class SpeakerFixupConfig:
     threshold: float = 0.5
     linkage: str = "single"
@@ -165,11 +175,12 @@ class Config:
     disk: DiskConfig = field(default_factory=DiskConfig)
     pipeline: list[str] = field(default_factory=lambda: [
         "fetch", "segment", "quality", "source_pass", "speaker_drift", "discard_rejected",
-        "merge", "speaker_fixup", "select", "finalize"])
+        "merge", "transcript_fixup", "speaker_fixup", "select", "finalize"])
     segment: SegmentConfig = field(default_factory=SegmentConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     source_pass: SourcePassConfig = field(default_factory=SourcePassConfig)
     speaker_drift: SpeakerDriftConfig = field(default_factory=SpeakerDriftConfig)
+    transcript_fixup: TranscriptFixupConfig = field(default_factory=TranscriptFixupConfig)
     speaker_fixup: SpeakerFixupConfig = field(default_factory=SpeakerFixupConfig)
     select: SelectConfig = field(default_factory=SelectConfig)
     finalize: FinalizeConfig = field(default_factory=FinalizeConfig)

@@ -68,7 +68,7 @@ class Finalize(Stage):
         rows = manifest.read(source.path)
         audio = dataset / "audio"
         audio.mkdir(parents=True, exist_ok=True)
-        manifest.write(dataset / f"{self.config.run.name}.csv", rows, manifest.STANDARD)
+        manifest.write(dataset / f"{self.config.run.name}.csv", rows, manifest.columns_of(rows, manifest.STANDARD))
 
         progress = ctx.log.progress(len(rows) * (1 + len(config.codecs) + config.zip))
         for row in rows:

@@ -7,11 +7,12 @@ import numpy as np
 from resonance.segmentation.sentences import Word
 
 WINDOW = 30.0                   # Whisper's input length; VAD segments are grouped up to it
+NUMERALS = "0123456789%$£€"     # a token holding any of these is one Whisper may not write when spelling numbers
 
 Span = tuple[float, float]
 
 
-def load(model: str) -> Any:
+def load(model: str, spell_numbers: bool = False) -> Any:
     """
     faster-whisper's batched pipeline, also recording the language Whisper detects in each window.
 
@@ -31,8 +32,15 @@ def load(model: str) -> Any:
             return encoder_output, output
 
     cuda = torch.cuda.is_available()
-    return Pipeline(WhisperModel(model, device="cuda" if cuda else "cpu",
-                                 compute_type="float16" if cuda else "int8"))
+    pipeline = Pipeline(WhisperModel(model, device="cuda" if cuda else "cpu",
+                                     compute_type="float16" if cuda else "int8"))
+    # Without its digit and currency tokens Whisper has to write a number the way it was said ("twenty twenty"),
+    # so the reading comes from the audio instead of from a verbalizer's guess. -1 keeps Whisper's own defaults.
+    tokenizer = pipeline.model.hf_tokenizer
+    pipeline.suppressed = [-1] + ([token for token in range(tokenizer.get_vocab_size())
+                                  if any(character in NUMERALS for character in tokenizer.decode([token]))]
+                                 if spell_numbers else [])
+    return pipeline
 
 
 def windows(speech: list[Span]) -> list[dict[str, float]]:
@@ -60,7 +68,8 @@ def transcribe(pipeline: Any, y: np.ndarray, speech: list[Span], language: str, 
     grouped = windows(speech)
     pipeline.languages = []
     segments, _ = pipeline.transcribe(y, language=language, batch_size=batch_size, beam_size=beam_size,
-                                      word_timestamps=True, clip_timestamps=grouped)
+                                      word_timestamps=True, clip_timestamps=grouped,
+                                      suppress_tokens=pipeline.suppressed)
     # kept as Whisper spells it, leading space included: a word fragment such as "-term" or ".S."
     # comes without one, and joining stripped tokens with spaces wrote "long -term" and "U .S."
     words = [Word(w.start, w.end, w.word)
@@ -70,6 +79,14 @@ def transcribe(pipeline: Any, y: np.ndarray, speech: list[Span], language: str, 
     foreign = [(window["start"], window["end"]) for window, detected in zip(grouped, pipeline.languages)
                if detected != language]
     return words, foreign
+
+
+def spell(pipeline: Any, y: np.ndarray, language: str, beam_size: int) -> str:
+    """One clip's transcript from a pipeline loaded with spell_numbers: every number written as it was said."""
+
+    segments, _ = pipeline.model.transcribe(y, language=language, beam_size=beam_size, without_timestamps=True,
+                                            condition_on_previous_text=False, suppress_tokens=pipeline.suppressed)
+    return "".join(segment.text for segment in segments).strip()
 
 
 def foreign_overlap(begin: float, end: float, foreign: list[Span]) -> bool:
