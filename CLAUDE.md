@@ -66,6 +66,8 @@ which one to use for each task. Each user keeps their own SSH aliases and checko
 - **A metric's exception is an error, not a rejection.** Auth, CUDA and out-of-memory errors stop the stage at
   once; other errors stop it above `quality.max_error_rate`. A metric raises `Unscorable` when the clip itself is
   the problem, and only that counts as a rejection.
+- **`segment.workers` Whisper loops share each GPU** (default 3, about 4.6 GB of GPU memory each). Six do not fit in
+  24 GB.
 - **Use spawn, not fork, for any process that touches CUDA** (`resonance/pipeline/gpu.py`, `pool.py`).
 - **Quality workers set TF32 matmuls on purpose.** Every threshold was calibrated that way; see
   `knowledge/yodas2_sidon.md` §15.

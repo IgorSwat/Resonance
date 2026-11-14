@@ -31,7 +31,7 @@ class SourceConfig:
 class ResourcesConfig:
     gpus: str | list[int] = "all"
     fetch_ahead: int = 3
-    cpu_workers: int = 8
+    cpu_workers: int = 24
     threads_per_worker: int = 4
 
 
@@ -45,6 +45,7 @@ class DiskConfig:
 @dataclass
 class SegmentConfig:
     whisper: str = "large-v3-turbo"
+    workers: int = 3
     batch_size: int = 16
     beam_size: int = 5
     margin: float = 2.0

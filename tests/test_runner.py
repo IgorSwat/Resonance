@@ -1,4 +1,6 @@
 import json
+import os
+import time
 import zipfile
 from pathlib import Path
 
@@ -134,3 +136,33 @@ def test_no_script_shadows_the_standard_library() -> None:
     names = {path.stem for path in scripts.rglob("*.py")}
     assert not names & set(sys.stdlib_module_names)
     assert names >= {"run_pipeline", "status", "preflight", "select_clips", "finalize"}
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("failure, message", [("raise", "this shard was told to fail"), ("die", "exit code 7")])
+def test_map_gpus_stops_every_process_when_a_shard_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         failure: str, message: str) -> None:
+    monkeypatch.setattr(gpu, "LIVENESS", 0.2)
+    pids = tmp_path / "pids"
+    started = time.time()
+    with pytest.raises(RuntimeError, match=message):
+        gpu.map_gpus(fakes.shard_job, [("wait", str(pids)), (failure, str(pids))], [None], threads=1)
+    assert time.time() - started < 60
+    time.sleep(0.5)
+    children = {behaviour: int(pid) for behaviour, pid in (line.split() for line in pids.read_text().splitlines())}
+    still_running = alive(children["wait"])
+    for pid in children.values():       # the failed shard's own child is not map_gpus's to stop
+        if alive(pid):
+            os.kill(pid, 9)
+    assert not still_running            # the waiting shard was stopped together with the child it had started
+
+
+def test_map_gpus_returns_results_in_shard_order(tmp_path: Path) -> None:
+    assert gpu.map_gpus(fakes.shard_job, [("a", str(tmp_path / "p")), ("b", str(tmp_path / "p"))], [None], 1) == ["a", "b"]

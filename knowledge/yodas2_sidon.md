@@ -386,7 +386,7 @@ Same box and date as §15. Config `configs/yodas2_sidon.yaml` defaults unless no
 
 | stage | old | new |
 |---|---|---|
-| segment | 447 s | 418 s with 8 prep workers, **380 s with 24** |
+| segment | 447 s | 418 s with 8 prep workers, 380 s with 24, **274 s with 24 and 3 Whisper loops** |
 | filters | 168 s (cascade, source pass, drift) | 144 s quality + 20 s speaker_drift |
 | speaker fixup | 19.5 s | 14 s |
 | select, finalize (2,815 clips, deflate zip) | not part of the old driver | 61 s |
@@ -404,7 +404,31 @@ prep workers; with 8 of them the GPU loop waited 60 s for audio, with 24 it wait
 | 64 | 334 s | 389 s | 5,926 |
 
 The time does not move, and the output does: a different batch changes which windows are decoded together. The
-default stays at 16. What limits Whisper here was not measured.
+default stays at 16.
+
+**Several Whisper loops per GPU do help, with identical output.** One loop leaves the GPU at 63%: the Python loop
+around Whisper is the limit, not the GPU. `segment.workers` runs that many loops on one GPU, each a process with its
+own model and its own share of the batch's recordings. Same batch, 24 prep workers in total:
+
+| `segment.workers` | segment stage | GPU utilisation | GPU memory |
+|---|---|---|---|
+| 1 | 390 s | 63% | 4.6 GB |
+| 2 | 295 s | 82% | 9.2 GB |
+| **3 (default)** | **274 s (-30%)** | 92% | 13.1 GB |
+| 4 | 263 s | 97% | 18.4 GB |
+| 6 | CUDA out of memory on 24 GB | | |
+
+`segment.csv` is byte-identical for 1, 2, 3 and 4 loops (5,948 clips). The default is 3: 4 is 4% faster and leaves
+about 5 GB free on a 24 GB card.
+
+**Confirmed end to end:** the same four batches (`00092` to `00095`) on both GPUs with `segment.workers: 3` and
+`cpu_workers: 24` took 17.3 min for the batch stages, 4.3 min per batch, against 21.5 min before, with the same
+14,799 kept and 10,917 selected clips. With both GPUs busy a batch segments in 4.6-5.5 min, slower than the 274 s
+measured on one GPU alone.
+
+⚑ When a loop fails, its helper processes must die with it. The 6-loop run first hung forever: the other loops were
+terminated, their prep workers were orphaned, and Python's exit waited on them. `gpu.map_gpus` now gives each shard
+its own process group and kills the group; the same run then failed in 32 s with the out-of-memory error.
 
 **Four batches on both GPUs, download to `audio.zip`** (`en001/train-00092` to `00095`, 16 prep workers per GPU):
 

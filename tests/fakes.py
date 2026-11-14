@@ -2,6 +2,9 @@
 
 import json
 import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -79,3 +82,20 @@ class FakeQuality(Stage):
         manifest.write(ctx.work_dir / "quality.csv", kept)
         ctx.summary.update(clips_in=len(rows), clips_out=len(kept), hours_out=len(kept) / 3600)
         return self.output(ctx)
+
+
+def shard_job(task: tuple[str, str], advance: object) -> str:
+    """A map_gpus job for tests: start a long-lived child and record its PID, then succeed, raise, wait or die."""
+
+    behaviour, pid_file = task
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    with open(pid_file, "a") as handle:
+        handle.write(f"{behaviour} {child.pid}\n")
+    if behaviour == "raise":
+        raise ValueError("this shard was told to fail")
+    if behaviour == "die":
+        os._exit(7)
+    if behaviour == "wait":
+        time.sleep(120)
+    child.kill()
+    return behaviour

@@ -20,7 +20,8 @@ source:
 resources:
   gpus: all                        # or a list of indices, e.g. [0, 1]
   fetch_ahead: 3                   # raw batches (about 3 GB each) downloaded ahead of the GPUs
-  cpu_workers: 8                   # processes that read, resample and VAD recordings ahead of Whisper, per GPU
+  cpu_workers: 24                  # processes that read, resample and VAD recordings ahead of Whisper, per GPU;
+                                   # with 8 the GPU waits for audio (418 s per batch against 380 s)
   threads_per_worker: 4            # thread cap of every worker process
 
 disk:                              # used only for the disk warning
@@ -35,6 +36,9 @@ pipeline: [fetch, segment, quality, source_pass, speaker_drift, discard_rejected
 
 segment:
   whisper: large-v3-turbo          # faster-whisper model name
+  workers: 3                       # Whisper loops sharing one GPU, each a process with its own model (about
+                                   # 4.6 GB of GPU memory each). One loop leaves the GPU at 63%; 4 is 4% faster
+                                   # than 3 but takes 18 GB, and 6 does not fit in 24 GB
   batch_size: 16                   # Whisper windows per batch
   beam_size: 5
   margin: 2.0                      # seconds read beyond the first and last caption

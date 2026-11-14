@@ -389,6 +389,9 @@ All by the user, 2026-11-14.
 
 ## 13. Not done
 
+Added after the plan: `segment.workers` runs several Whisper loops on one GPU (default 3), which cut segmenting by
+30% with identical output, and `resources.cpu_workers` defaults to 24 (`knowledge/yodas2_sidon.md` §16).
+
 - **Batched quality metrics** (section 9, item 3). The quality stage still scores one clip at a time in 6 worker
   processes per GPU, as the old filter did, with identical verdicts. Segmenting is about 70% of a batch's time and
   Whisper most of that, so this was not where the time is; it stays open as an optimization with the 99.5% parity

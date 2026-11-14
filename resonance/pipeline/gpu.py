@@ -3,8 +3,10 @@
 import contextlib
 import multiprocessing
 import os
+import queue
 import resource
 import shutil
+import signal
 import subprocess
 import traceback
 from pathlib import Path
@@ -13,6 +15,7 @@ from typing import Any, Callable, Iterator, Sequence
 from resonance.log.capture import captured
 from resonance.log.events import Progress
 
+LIVENESS = 5.0              # seconds between checks that every shard process is still alive
 THREAD_VARIABLES = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS")
 
 
@@ -86,7 +89,8 @@ def map_gpus(function: Callable[[Any, Callable[[int], None]], Any], shards: Sequ
     function(shard, advance) for every shard, each in its own process on its own GPU; results in shard order.
 
     Always a child process, even for one shard, so the caller never holds CUDA or a model's memory. The
-    children's raw output is appended to `log`.
+    children's raw output is appended to `log`. When one shard fails, the others are stopped together with every
+    process they started, and the failure is raised here.
     """
 
     results = multiprocessing.get_context("spawn").Queue()
@@ -95,7 +99,16 @@ def map_gpus(function: Callable[[Any, Callable[[int], None]], Any], shards: Sequ
     out: dict[int, Any] = {}
     try:
         while len(out) < len(shards):
-            kind, index, payload = results.get()
+            try:
+                kind, index, payload = results.get(timeout=LIVENESS)
+            except queue.Empty:
+                # a process killed from outside, or one that crashed below Python, never reports
+                gone = [index for index, process in enumerate(processes)
+                        if index not in out and not process.is_alive()]
+                if gone and results.empty():
+                    raise RuntimeError(f"shard {gone[0]} died without a result "
+                                       f"(exit code {processes[gone[0]].exitcode})") from None
+                continue
             if kind == "progress":
                 if progress is not None:
                     progress.advance(payload)
@@ -105,8 +118,8 @@ def map_gpus(function: Callable[[Any, Callable[[int], None]], Any], shards: Sequ
                 out[index] = payload
     finally:
         for process in processes:
-            if len(out) < len(shards):
-                process.terminate()
+            if len(out) < len(shards) and process.is_alive():
+                _stop(process)
             process.join()
     if progress is not None:
         progress.flush()
@@ -114,12 +127,24 @@ def map_gpus(function: Callable[[Any, Callable[[int], None]], Any], shards: Sequ
 
 
 def _shard(function: Callable, index: int, shard: Any, results: Any, log: Path | None) -> None:
+    # its own process group, so stopping this shard also stops the worker processes it starts; left running,
+    # they would keep the parent from ever exiting
+    os.setsid()
     try:
         with captured(log):
             value = function(shard, lambda count=1: results.put(("progress", index, count)))
         results.put(("done", index, value))
     except Exception:
         results.put(("error", index, traceback.format_exc()))
+
+
+def _stop(process: multiprocessing.Process) -> None:
+    """Kill a shard's whole process group; a shard that has not made its group yet is terminated alone."""
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        process.terminate()
 
 
 def split(items: Sequence[Any], parts: int) -> list[list[Any]]:
