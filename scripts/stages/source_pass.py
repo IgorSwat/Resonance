@@ -1,4 +1,5 @@
-"""Drop the recordings of one batch that the multi-speaker metric flagged too often.
+"""
+Drop the recordings of one batch that the multi-speaker metric flagged too often.
 
     python scripts/stages/source_pass.py --config configs/yodas2_sidon.yaml --batch en001/91
     python scripts/stages/source_pass.py --config configs/yodas2_sidon.yaml --batch en001/91 --force

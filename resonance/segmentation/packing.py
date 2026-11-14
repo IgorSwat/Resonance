@@ -17,15 +17,18 @@ def gaps(speech: list[Span], duration: float, min_gap: float) -> list[Span]:
 
 
 def boundary(silences: list[Span], before: float, after: float) -> Span | None:
-    """The longest silence between two words (before: the earlier word's end, after: the later's start), allowing
-    TOLERANCE for Whisper's timing; None when they are not separated by a pause."""
+    """
+    The longest silence between two words (before: the earlier word's end, after: the later's start), allowing
+    TOLERANCE for Whisper's timing; None when they are not separated by a pause.
+    """
 
     candidates = [(a, b) for a, b in silences if a < after + TOLERANCE and b > before - TOLERANCE]
     return max(candidates, key=lambda gap: gap[1] - gap[0], default=None)
 
 
 def pack(sentences: list[Sentence], silences: list[Span], config: SegmentConfig) -> list[tuple[float, float, str]]:
-    """Whole closed sentences packed into utterances of about target_duration, cut in real pauses with `lead`
+    """
+    Whole closed sentences packed into utterances of about target_duration, cut in real pauses with `lead`
     seconds of silence before the speech and `trail` after, as far as the pause allows; (begin, end, text).
 
     A sentence Whisper did not close with punctuation, or one interrupted by a long pause, is never part of an

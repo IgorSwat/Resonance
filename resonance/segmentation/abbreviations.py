@@ -1,4 +1,5 @@
-"""Words ending in a period that do not end a sentence, per language.
+"""
+Words ending in a period that do not end a sentence, per language.
 
 Kept apart rather than merged: Polish "ok." would otherwise stop "That's ok." from ending an English sentence.
 """

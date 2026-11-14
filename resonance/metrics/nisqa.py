@@ -43,7 +43,8 @@ class NisqaMetric(Metric):
         return dict(zip(FIELDS, self._predict(y.reshape(1, -1), sample_rate)))
 
     def _predict(self, waveform: np.ndarray, sample_rate: int) -> list[float]:
-        """NISQA's own forward, submodule by submodule, so the model can leave the CPU.
+        """
+        NISQA's own forward, submodule by submodule, so the model can leave the CPU.
 
         torchmetrics loads the checkpoint with map_location='cpu' and never moves it, which
         leaves the framewise CNN — ~245 windows per clip, each a stack of six tiny convolutions
@@ -65,7 +66,8 @@ class NisqaMetric(Metric):
         return scores.reshape(-1).tolist()
 
     def _melspec(self, waveform: np.ndarray, sample_rate: int) -> torch.Tensor:
-        """torchmetrics' _get_librosa_melspec, on the model's device.
+        """
+        torchmetrics' _get_librosa_melspec, on the model's device.
 
         librosa's STFT and filterbank product ran on one CPU core at ~70 ms a clip, most of the
         stage's cost; this is the same transform — periodic Hann window centred in n_fft,

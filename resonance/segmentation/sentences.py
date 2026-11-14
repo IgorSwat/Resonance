@@ -45,8 +45,10 @@ def split(words: list[Word], max_pause: float, abbreviations: set[str], ordinal_
 
 
 def terminal(text: str, abbreviations: set[str], ordinal_dot: bool = False) -> bool:
-    """Whether a word ends a sentence: a final . ? ! that is not a known abbreviation (nor, with ordinal_dot, a
-    number with a dot)."""
+    """
+    Whether a word ends a sentence: a final . ? ! that is not a known abbreviation (nor, with ordinal_dot, a
+    number with a dot).
+    """
 
     stripped = text.strip().rstrip(CLOSING)
     if ordinal_dot and stripped.endswith(".") and stripped[:-1].isdigit():

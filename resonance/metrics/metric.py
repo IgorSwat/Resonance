@@ -7,7 +7,8 @@ from resonance.io.audio import Audio
 
 
 class Unscorable(ValueError):
-    """The clip cannot be scored for a reason that is the clip's own (too short, silent, nothing to align).
+    """
+    The clip cannot be scored for a reason that is the clip's own (too short, silent, nothing to align).
 
     The cascade counts it as a rejection by that metric. Any other exception is an error, not a verdict.
     """

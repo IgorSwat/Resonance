@@ -1,4 +1,5 @@
-"""Pack a run's selected clips into the dataset: <run>.csv, audio.zip and optional codec tokens.
+"""
+Pack a run's selected clips into the dataset: <run>.csv, audio.zip and optional codec tokens.
 
     python scripts/stages/finalize.py --config configs/yodas2_sidon.yaml
     python scripts/stages/finalize.py --config configs/yodas2_sidon.yaml --force

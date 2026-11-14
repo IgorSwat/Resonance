@@ -1,4 +1,5 @@
-"""Drop the clips of one batch whose voice changes partway through (ECAPA).
+"""
+Drop the clips of one batch whose voice changes partway through (ECAPA).
 
     python scripts/stages/speaker_drift.py --config configs/yodas2_sidon.yaml --batch en001/91
     python scripts/stages/speaker_drift.py --config configs/yodas2_sidon.yaml --batch en001/91 --force

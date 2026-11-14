@@ -17,7 +17,8 @@ THREAD_VARIABLES = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
 
 
 def discover(requested: str | list[int]) -> list[int | None]:
-    """GPU indices to use; [None] on a machine without NVIDIA GPUs, meaning one worker on whatever torch finds.
+    """
+    GPU indices to use; [None] on a machine without NVIDIA GPUs, meaning one worker on whatever torch finds.
 
     Asked of nvidia-smi rather than torch, so the parent process never initialises CUDA.
     """
@@ -47,7 +48,8 @@ def raise_file_limit() -> None:
 
 @contextlib.contextmanager
 def pinned(gpu: int | None, threads: int) -> Iterator[None]:
-    """The environment a process started inside this block inherits: one visible GPU and capped thread pools.
+    """
+    The environment a process started inside this block inherits: one visible GPU and capped thread pools.
 
     The caps matter on many-core boxes: every BLAS and OpenMP pool otherwise starts one thread per core in every
     worker, which runs into the container's process limit.
@@ -80,7 +82,8 @@ def spawn(target: Callable, args: tuple, gpu: int | None, threads: int) -> multi
 def map_gpus(function: Callable[[Any, Callable[[int], None]], Any], shards: Sequence[Any],
              gpus: Sequence[int | None], threads: int, progress: Progress | None = None,
              log: Path | None = None) -> list:
-    """function(shard, advance) for every shard, each in its own process on its own GPU; results in shard order.
+    """
+    function(shard, advance) for every shard, each in its own process on its own GPU; results in shard order.
 
     Always a child process, even for one shard, so the caller never holds CUDA or a model's memory. The
     children's raw output is appended to `log`.

@@ -1,4 +1,5 @@
-"""segment: RawBatch -> ClipManifest. Cuts recordings into sentence-aligned utterances with Whisper transcripts.
+"""
+segment: RawBatch -> ClipManifest. Cuts recordings into sentence-aligned utterances with Whisper transcripts.
 
 A recording is one long-form video. Its captions are not utterances: they start and end mid-sentence, and their
 timestamps cut into speech. So the captions only say where speech is, and the recording is re-segmented from

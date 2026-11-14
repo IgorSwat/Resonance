@@ -1,4 +1,5 @@
-"""Cut one fetched batch into sentence-aligned utterances with Whisper transcripts.
+"""
+Cut one fetched batch into sentence-aligned utterances with Whisper transcripts.
 
     python scripts/stages/segment.py --config configs/yodas2_sidon.yaml --batch en001/91
     python scripts/stages/segment.py --config configs/yodas2_sidon.yaml --batch en001/91 --force

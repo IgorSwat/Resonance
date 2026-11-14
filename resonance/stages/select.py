@@ -1,4 +1,5 @@
-"""select: ClipManifest -> ClipManifest. Keeps a bounded number of clips per speaker.
+"""
+select: ClipManifest -> ClipManifest. Keeps a bounded number of clips per speaker.
 
 Simple rules for now: a speaker with fewer than min_per_speaker clips is left out; one with more than
 max_per_speaker clips, or more than max_minutes_per_speaker of audio, keeps a random subset within both caps.
@@ -15,7 +16,8 @@ from resonance.pipeline.stage import Context, Stage
 
 
 def choose(rows: list[Row], config: SelectConfig) -> list[Row]:
-    """The selected rows, in their original order.
+    """
+    The selected rows, in their original order.
 
     Each speaker's clips are shuffled with a seed made of config.seed and the speaker ID, so a speaker's selection
     does not change when other speakers join or leave the pool.

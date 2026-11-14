@@ -1,5 +1,7 @@
-"""Runs the batch stages of a pipeline over many batches: one worker process per GPU pulling from a shared queue,
-and one downloader thread feeding it."""
+"""
+Runs the batch stages of a pipeline over many batches: one worker process per GPU pulling from a shared queue,
+and one downloader thread feeding it.
+"""
 
 import multiprocessing
 import multiprocessing.queues

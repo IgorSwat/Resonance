@@ -1,4 +1,5 @@
-"""Select clips from a run's pool within the per-speaker bounds.
+"""
+Select clips from a run's pool within the per-speaker bounds.
 
     python scripts/stages/select_clips.py --config configs/yodas2_sidon.yaml
     python scripts/stages/select_clips.py --config configs/yodas2_sidon.yaml --force

@@ -1,4 +1,5 @@
-"""Download and unpack one batch of YODAS2-Sidon.
+"""
+Download and unpack one batch of YODAS2-Sidon.
 
     python scripts/stages/fetch.py --config configs/yodas2_sidon.yaml --batch en001/91
     python scripts/stages/fetch.py --config configs/yodas2_sidon.yaml --batch en001/91 --force

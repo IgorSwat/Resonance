@@ -1,4 +1,5 @@
-"""Merge the video IDs of a run's pool that are one person.
+"""
+Merge the video IDs of a run's pool that are one person.
 
     python scripts/stages/speaker_fixup.py --config configs/yodas2_sidon.yaml
     python scripts/stages/speaker_fixup.py --config configs/yodas2_sidon.yaml --force

@@ -1,4 +1,5 @@
-"""YODAS2-Sidon on HuggingFace: where its batches are and how one recording is read.
+"""
+YODAS2-Sidon on HuggingFace: where its batches are and how one recording is read.
 
 The corpus is one directory per language shard in sarulab-speech/yodas2_sidon, named <lang><NNN> (pl000, en001),
 each holding a numbered run of train-XXXXX.tar.gz batches of about 3 GB. A batch unpacks flat: one <n>.flac per
@@ -64,7 +65,8 @@ def recordings(directory: Path) -> list[Path]:
 
 
 def read_recording(meta_path: Path, margin: float) -> tuple[dict, np.ndarray, int, float, float] | None:
-    """A recording's captioned span widened by `margin`: (meta, audio, rate, offset, duration), or None when it
+    """
+    A recording's captioned span widened by `margin`: (meta, audio, rate, offset, duration), or None when it
     has no captions or cannot be read.
 
     Only the span between the first caption's start and the last caption's end is read: the rest of the video

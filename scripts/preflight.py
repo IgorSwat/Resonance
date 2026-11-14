@@ -1,4 +1,5 @@
-"""Check that this machine can run a pipeline: packages, aria2c, GPUs, HF token and gated models, disk.
+"""
+Check that this machine can run a pipeline: packages, aria2c, GPUs, HF token and gated models, disk.
 
     python scripts/preflight.py --config configs/yodas2_sidon.yaml
     python scripts/preflight.py --offline

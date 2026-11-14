@@ -1,4 +1,5 @@
-"""speaker_fixup: ClipManifest -> ClipManifest. Merges the source IDs that are one person recorded in several videos.
+"""
+speaker_fixup: ClipManifest -> ClipManifest. Merges the source IDs that are one person recorded in several videos.
 
 The corpus carries no speaker field, so speaker_id starts out as the video ID. A channel host appears in every
 video they publish, so one person routinely holds dozens of IDs. This embeds a few clips per source, clusters the

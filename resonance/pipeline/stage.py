@@ -19,8 +19,10 @@ class FatalError(RuntimeError):
 
 
 def guard(error: str, errors: int, total: int, limit: float) -> None:
-    """Called for every clip that raised: stop the stage at once on a fatal error, or when more than `limit` of
-    the stage's clips have failed. Errors are never counted as rejections."""
+    """
+    Called for every clip that raised: stop the stage at once on a fatal error, or when more than `limit` of
+    the stage's clips have failed. Errors are never counted as rejections.
+    """
 
     if FATAL.search(error):
         raise FatalError(f"fatal error, stopping the stage: {error}")
@@ -41,7 +43,8 @@ class Context:
 
 
 class Stage(abc.ABC):
-    """One step of a pipeline: a well-specified input artifact in, a well-specified output artifact out.
+    """
+    One step of a pipeline: a well-specified input artifact in, a well-specified output artifact out.
 
     A `batch` stage runs once per batch, a `pool` stage once per run over all batches together. `provides` names
     side files the stage leaves in its work folder, `needs` the side files it reads there; the runner checks both,

@@ -1,4 +1,5 @@
-"""finalize: ClipManifest -> Dataset. Packs the selected clips into the final product.
+"""
+finalize: ClipManifest -> Dataset. Packs the selected clips into the final product.
 
     runs/<run>/dataset/<run>.csv        the five standard columns
     runs/<run>/dataset/audio.zip        <name>.wav for every selected clip
@@ -120,7 +121,8 @@ class Finalize(Stage):
 
 
 def restore(config: Config) -> int:
-    """Undo finalize's move: put every selected clip back where it came from and drop the dataset.
+    """
+    Undo finalize's move: put every selected clip back where it came from and drop the dataset.
 
     Returns how many clips were put back. The dataset folder is removed only once every clip is back in place.
     """

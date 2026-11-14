@@ -1,4 +1,5 @@
-"""source_pass: ClipManifest + verdicts.csv -> ClipManifest. Drops whole recordings that look like conversations.
+"""
+source_pass: ClipManifest + verdicts.csv -> ClipManifest. Drops whole recordings that look like conversations.
 
 A recording whose diarised clips are flagged this often is an interview or a panel, and the rest of its clips
 are not trusted either: the per-clip metric cannot see that, because each single clip really is single-voice.
@@ -19,7 +20,8 @@ GATE = "multi_speaker"
 
 def flagged_sources(verdicts: list[dict[str, str]], order: list[str], max_flag_rate: float,
                     min_clips: int) -> set[str]:
-    """Sources where the multi-speaker metric rejected at least max_flag_rate of the clips it scored.
+    """
+    Sources where the multi-speaker metric rejected at least max_flag_rate of the clips it scored.
 
     `order` is the cascade's metric order: a clip reached the multi-speaker metric when it was accepted or
     rejected by that metric or a later one. Sources with fewer than min_clips scored clips are left alone.

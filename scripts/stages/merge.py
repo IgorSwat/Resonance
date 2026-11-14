@@ -1,4 +1,5 @@
-"""Concatenate the filtered batches of a run into one pool.
+"""
+Concatenate the filtered batches of a run into one pool.
 
     python scripts/stages/merge.py --config configs/yodas2_sidon.yaml
     python scripts/stages/merge.py --config configs/yodas2_sidon.yaml --force

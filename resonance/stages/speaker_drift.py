@@ -1,4 +1,5 @@
-"""speaker_drift: ClipManifest -> ClipManifest. Drops clips whose voice changes partway through.
+"""
+speaker_drift: ClipManifest -> ClipManifest. Drops clips whose voice changes partway through.
 
 The last guard against a second voice. The cascade's multi-speaker metric asks who speaks when, so it merges two
 similar voices taking clean turns; the source pass judges a whole recording, so it cannot remove a good

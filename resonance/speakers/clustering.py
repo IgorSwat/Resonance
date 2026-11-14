@@ -18,7 +18,8 @@ BLOCK_BYTES = 1 << 30           # memory one block of the clip-by-clip cosine ma
 
 
 def compare(embeddings: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
-    """Per source pair, in sorted source order: the share of clip pairs that agree, and their closest clip pair.
+    """
+    Per source pair, in sorted source order: the share of clip pairs that agree, and their closest clip pair.
 
     The share drives the clustering; the closest pair only tells whether a merge is duplicated audio rather than
     one person recorded twice. All clips are stacked and compared with one matrix product per block of rows,
@@ -52,7 +53,8 @@ def compare(embeddings: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
 
 
 def merge_map(sources: list[str], agreement: np.ndarray, threshold: float, method: str = "single") -> dict[str, str]:
-    """Source ID -> the lowest ID of its cluster, for the ones that move.
+    """
+    Source ID -> the lowest ID of its cluster, for the ones that move.
 
     Single linkage because the errors are not symmetric: merging two similar voices costs a little diversity,
     splitting one person across IDs costs split integrity. Complete linkage splits a person on their weakest

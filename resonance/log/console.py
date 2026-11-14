@@ -1,5 +1,7 @@
-"""Renders Events: one tqdm bar per worker plus an overall batch bar on the terminal, plain lines in run.log, and
-every event but progress in events.jsonl."""
+"""
+Renders Events: one tqdm bar per worker plus an overall batch bar on the terminal, plain lines in run.log, and
+every event but progress in events.jsonl.
+"""
 
 import dataclasses
 import json

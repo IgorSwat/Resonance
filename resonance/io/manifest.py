@@ -1,4 +1,5 @@
-"""The clip manifest: Resonance's `|`-separated CSV, never quoted, rows ending in CRLF.
+"""
+The clip manifest: Resonance's `|`-separated CSV, never quoted, rows ending in CRLF.
 
 Transcripts can hold a bare `\\r` or an escaped `|`, so manifests are read and written only through this module.
 Between stages a manifest carries EXTRA columns; `finalize` trims it to STANDARD.

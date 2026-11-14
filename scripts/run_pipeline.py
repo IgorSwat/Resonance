@@ -1,4 +1,5 @@
-"""Run a whole pipeline, unattended: fetch, segment, filter, fix speakers, select and pack.
+"""
+Run a whole pipeline, unattended: fetch, segment, filter, fix speakers, select and pack.
 
     python scripts/run_pipeline.py --config configs/yodas2_sidon.yaml
     python scripts/run_pipeline.py --config configs/yodas2_sidon.yaml --dry-run

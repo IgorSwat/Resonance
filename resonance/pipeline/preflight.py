@@ -52,7 +52,8 @@ def _parts(config: Config) -> set[str]:
 
 
 def download_models(config: Config, report: Callable[[str], None]) -> None:
-    """Load every model the pipeline uses once, on the CPU, so each is in the cache before the first batch.
+    """
+    Load every model the pipeline uses once, on the CPU, so each is in the cache before the first batch.
 
     Without this a stage's worker processes all download the same file at the same moment on a fresh machine.
     """

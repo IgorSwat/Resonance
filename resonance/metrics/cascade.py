@@ -1,4 +1,5 @@
-"""The quality cascade: cheapest metric first, stopping at the first one a clip fails.
+"""
+The quality cascade: cheapest metric first, stopping at the first one a clip fails.
 
 DSP metrics run before the model metrics, so most rejects cost microseconds and the segmentation, NISQA and CTC
 forward passes only see audio that already survived. The order is the config's `quality.metrics` list.
@@ -18,8 +19,10 @@ METRICS = ("bandwidth", "clipping", "hum", "flatness", "multi_speaker", "nisqa",
 
 
 def build(name: str, config: QualityConfig) -> tuple[Metric, Any]:
-    """The metric called `name` and the bounds the config holds it to. Imported here, so a metric that is switched
-    off never loads its libraries."""
+    """
+    The metric called `name` and the bounds the config holds it to. Imported here, so a metric that is switched
+    off never loads its libraries.
+    """
 
     if name == "bandwidth":
         from resonance.metrics.effective_bandwidth import EffectiveBandwidthMetric
@@ -54,7 +57,8 @@ class Cascade:
         self.stages = [(name, *build(name, config)) for name in config.metrics]
 
     def run(self, audio: Audio, transcript: str | None = None) -> tuple[str, dict[str, dict]]:
-        """(verdict, scores): ACCEPTED or what rejected the clip, and every score computed on the way.
+        """
+        (verdict, scores): ACCEPTED or what rejected the clip, and every score computed on the way.
 
         The verdict of a rejection is the metric's name. A metric's exception is not caught here: it is an error,
         not a verdict, and the caller decides what to do with it.

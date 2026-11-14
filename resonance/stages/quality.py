@@ -1,4 +1,5 @@
-"""quality: ClipManifest -> ClipManifest + verdicts.csv. Judges every clip with the quality cascade.
+"""
+quality: ClipManifest -> ClipManifest + verdicts.csv. Judges every clip with the quality cascade.
 
 Each worker of a spawned pool holds every model on the GPU, reads its clip, runs the cascade and sends back only
 the verdict and the scores. verdicts.csv lists every input clip with its verdict and the scores behind it, so a

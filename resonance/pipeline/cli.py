@@ -21,7 +21,7 @@ MARKS = {"ok": f"{style.GREEN}ok{style.RESET}", "warning": f"{style.YELLOW}warni
 def parser(doc: str) -> argparse.ArgumentParser:
     """An argument parser with the options every script takes; `doc` is the script's docstring."""
 
-    result = argparse.ArgumentParser(description=doc, formatter_class=argparse.RawDescriptionHelpFormatter)
+    result = argparse.ArgumentParser(description=doc.strip(), formatter_class=argparse.RawDescriptionHelpFormatter)
     result.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
                         help=f"pipeline config (default: {DEFAULT_CONFIG})")
     result.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", dest="overrides",

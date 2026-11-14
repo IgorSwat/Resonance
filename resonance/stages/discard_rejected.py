@@ -1,4 +1,5 @@
-"""discard_rejected: ClipManifest -> ClipManifest. Deletes the audio of every clip the batch's filters rejected.
+"""
+discard_rejected: ClipManifest -> ClipManifest. Deletes the audio of every clip the batch's filters rejected.
 
 About half of a batch's segmented clips fail the filters, and their wavs would otherwise stay on disk for good.
 The manifest passes through unchanged. After this stage the filters cannot rerun on the batch without segmenting

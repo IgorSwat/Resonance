@@ -1,4 +1,5 @@
-"""Run the quality cascade over one segmented batch; writes quality.csv and verdicts.csv.
+"""
+Run the quality cascade over one segmented batch; writes quality.csv and verdicts.csv.
 
     python scripts/stages/quality.py --config configs/yodas2_sidon.yaml --batch en001/91
     python scripts/stages/quality.py --config configs/yodas2_sidon.yaml --batch en001/91 --force

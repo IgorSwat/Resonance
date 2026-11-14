@@ -1,4 +1,5 @@
-"""Delete the audio of every clip the filters rejected in one batch.
+"""
+Delete the audio of every clip the filters rejected in one batch.
 
     python scripts/stages/discard_rejected.py --config configs/yodas2_sidon.yaml --batch en001/91
     python scripts/stages/discard_rejected.py --config configs/yodas2_sidon.yaml --batch en001/91 --force

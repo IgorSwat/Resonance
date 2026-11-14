@@ -16,7 +16,8 @@ def setup(threads: int) -> None:
 
 
 def prepare(task: tuple[Path, float]) -> dict:
-    """Read, resample and VAD one recording: {path, loaded, y, speech, spent} or {path, error, spent}.
+    """
+    Read, resample and VAD one recording: {path, loaded, y, speech, spent} or {path, error, spent}.
 
     A process rather than a thread: faster-whisper's VAD steps through the audio in Python and holds the GIL, so
     threads queue behind each other. `loaded` is None for a recording without captions.

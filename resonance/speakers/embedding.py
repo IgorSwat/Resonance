@@ -17,7 +17,8 @@ def longest(paths: list[Path], count: int) -> list[Path]:
 
 
 def embed(sources: list[tuple[str, list[Path]]], advance: Callable[[int], None]) -> dict[str, np.ndarray]:
-    """The per-clip vectors of each source, L2-normalised, as {source: (clips, dimensions)}.
+    """
+    The per-clip vectors of each source, L2-normalised, as {source: (clips, dimensions)}.
 
     Kept per clip rather than averaged: a centroid blurs a source holding more than one voice. Runs in a process
     pinned to one GPU (resonance/pipeline/gpu.py), so the device is whatever that process sees.

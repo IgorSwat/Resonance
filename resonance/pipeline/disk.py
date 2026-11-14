@@ -28,7 +28,8 @@ class Estimate:
 
 def estimate(config: Config, pending: int, total: int, gpus: int, free_gb: float,
              measured_gb: float | None = None) -> Estimate:
-    """Disk still needed for `pending` batches of a run of `total`.
+    """
+    Disk still needed for `pending` batches of a run of `total`.
 
     A batch's clips cost clips_gb_per_batch while it is filtered and kept_share of that afterwards, when the
     pipeline discards rejected audio. Zipping needs the selected clips a second time: at most every kept clip of

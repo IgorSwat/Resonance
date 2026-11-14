@@ -9,7 +9,8 @@ from typing import Iterator
 
 @contextlib.contextmanager
 def captured(path: Path | None) -> Iterator[None]:
-    """Inside the block, stdout and stderr of this process and of every process it starts are appended to `path`.
+    """
+    Inside the block, stdout and stderr of this process and of every process it starts are appended to `path`.
 
     Done on the file descriptors, not on sys.stdout, so C libraries and child processes are covered too.
     """

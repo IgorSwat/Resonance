@@ -12,7 +12,8 @@ Span = tuple[float, float]
 
 
 def load(model: str) -> Any:
-    """faster-whisper's batched pipeline, also recording the language Whisper detects in each window.
+    """
+    faster-whisper's batched pipeline, also recording the language Whisper detects in each window.
 
     Decoding stays forced to the corpus language, so a foreign window comes out as a *translation* rather than as
     its own language, and nothing in the text gives it away. The language is read off the encoder output the batch
@@ -51,8 +52,10 @@ def windows(speech: list[Span]) -> list[dict[str, float]]:
 
 def transcribe(pipeline: Any, y: np.ndarray, speech: list[Span], language: str, batch_size: int,
                beam_size: int) -> tuple[list[Word], list[Span]]:
-    """Every word Whisper hears in the span, with its timestamps in span seconds, and the windows whose language
-    Whisper detects as something other than `language`, as (start, end) in span seconds."""
+    """
+    Every word Whisper hears in the span, with its timestamps in span seconds, and the windows whose language
+    Whisper detects as something other than `language`, as (start, end) in span seconds.
+    """
 
     grouped = windows(speech)
     pipeline.languages = []
