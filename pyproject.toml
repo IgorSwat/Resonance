@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-higgs = ["transformers>=5.0"]
+higgs = ["accelerate", "transformers>=5.0"]
 test = ["pytest"]
 
 [tool.setuptools.packages.find]

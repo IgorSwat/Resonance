@@ -131,4 +131,4 @@ finalize:
   move: true                       # move the selected clips out of clips/ instead of copying them
   zip: true                        # pack audio/ into audio.zip and remove audio/
   compression: deflate             # deflate (lossless) or stored
-  codecs: []                       # e.g. [higgs] also writes codecs/higgs/<name>.npy
+  codecs: []                       # e.g. [higgs] also writes codecs/higgs/<name>.npy; needs `pip install .[higgs]`

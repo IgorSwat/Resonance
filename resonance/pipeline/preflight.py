@@ -18,7 +18,7 @@ MODULES = {
     "ctc": ("torchaudio", "uroman"),
     "speaker_drift": ("speechbrain",),
     "speaker_fixup": ("pyannote.audio", "scipy", "librosa"),
-    "higgs": ("transformers",),
+    "higgs": ("transformers", "accelerate"),
 }
 
 
@@ -121,7 +121,7 @@ def _modules(parts: set[str]) -> Check:
     wanted = sorted({module for part in parts for module in MODULES.get(part, ())})
     missing = [module for module in wanted if not _importable(module)]
     return Check("python packages", "fail" if missing else "ok",
-                 f"missing: {', '.join(missing)}; run scripts/setup.sh" if missing else f"{len(wanted)} found")
+                 f"missing: {', '.join(missing)}; run scripts/setup.sh (a codec needs `pip install .[<codec>]`)" if missing else f"{len(wanted)} found")
 
 
 def _importable(module: str) -> bool:

@@ -47,7 +47,6 @@ def test_whole_pipeline_on_two_fake_gpus(tmp_path: Path, monkeypatch: pytest.Mon
     assert {entry["gpu"] for entry in ran} == {"0", "1"} and len({entry["pid"] for entry in ran}) == 2
     assert {entry["threads"] for entry in ran} == {str(config.resources.threads_per_worker)}
     for ref in batches(config):
-        assert not layout.raw(ref).exists() or True     # the fake segment keeps raw; the real one removes it
         assert len(manifest.read(layout.batch_dir(ref) / "discard_rejected.csv")) == KEPT
     # rejected audio is gone, kept audio moved into the zip, and the batches are marked consumed
     assert not any(layout.root.glob("clips/*/*/*.wav"))
