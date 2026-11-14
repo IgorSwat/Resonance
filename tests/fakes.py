@@ -91,6 +91,12 @@ def shard_job(task: tuple[str, str], advance: object) -> str:
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     with open(pid_file, "a") as handle:
         handle.write(f"{behaviour} {child.pid}\n")
+    deadline = time.time() + 30
+    while behaviour in ("raise", "die") and time.time() < deadline:     # fail only once the other shard is up
+        with open(pid_file) as handle:
+            if "wait " in handle.read():
+                break
+        time.sleep(0.05)
     if behaviour == "raise":
         raise ValueError("this shard was told to fail")
     if behaviour == "die":
