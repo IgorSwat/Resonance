@@ -15,6 +15,7 @@ STAGES = {
     "transcript_fixup": "resonance.stages.transcript_fixup:TranscriptFixup",
     "speaker_fixup": "resonance.stages.speaker_fixup:SpeakerFixup",
     "select": "resonance.stages.select:Select",
+    "highlights": "resonance.stages.highlights:Highlights",
     "finalize": "resonance.stages.finalize:Finalize",
 }
 

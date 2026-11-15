@@ -23,12 +23,13 @@ dependencies = [
     "torchaudio",
     "torchmetrics",
     "tqdm",
+    "transformers>=5.0",
     "uroman",
     "verbalis==0.1.1",
 ]
 
 [project.optional-dependencies]
-higgs = ["accelerate", "transformers>=5.0"]
+higgs = ["accelerate"]
 test = ["pytest"]
 
 [tool.setuptools.packages.find]
