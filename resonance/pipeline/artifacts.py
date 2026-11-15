@@ -59,6 +59,7 @@ class Layout:
         self.root = config.run.data_root
         self.run_dir = self.root / "runs" / config.run.name
         self.dataset = self.run_dir / "dataset"
+        self.highlights = self.run_dir / "highlights"
 
     def raw(self, batch: BatchRef) -> Path:
         return self.root / "raw" / batch.language / batch.shard / batch.name

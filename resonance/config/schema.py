@@ -160,6 +160,13 @@ class SelectConfig:
 
 
 @dataclass
+class HighlightsConfig:
+    per_list: int = 50
+    per_speaker: int = 2
+    workers: int = 1
+
+
+@dataclass
 class FinalizeConfig:
     move: bool = True
     zip: bool = True
@@ -175,7 +182,7 @@ class Config:
     disk: DiskConfig = field(default_factory=DiskConfig)
     pipeline: list[str] = field(default_factory=lambda: [
         "fetch", "segment", "quality", "source_pass", "speaker_drift", "discard_rejected",
-        "merge", "transcript_fixup", "speaker_fixup", "select", "finalize"])
+        "merge", "transcript_fixup", "speaker_fixup", "select", "highlights", "finalize"])
     segment: SegmentConfig = field(default_factory=SegmentConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     source_pass: SourcePassConfig = field(default_factory=SourcePassConfig)
@@ -183,4 +190,5 @@ class Config:
     transcript_fixup: TranscriptFixupConfig = field(default_factory=TranscriptFixupConfig)
     speaker_fixup: SpeakerFixupConfig = field(default_factory=SpeakerFixupConfig)
     select: SelectConfig = field(default_factory=SelectConfig)
+    highlights: HighlightsConfig = field(default_factory=HighlightsConfig)
     finalize: FinalizeConfig = field(default_factory=FinalizeConfig)

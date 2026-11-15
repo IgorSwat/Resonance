@@ -24,7 +24,7 @@ disk:                              # used only for the disk warning
 # The stages, in order. Remove a name to skip that stage; source_pass and speaker_drift can also be switched off
 # below. Batch stages (up to discard_rejected) run once per batch, the rest once over all batches.
 pipeline: [fetch, segment, quality, source_pass, speaker_drift, discard_rejected,
-           merge, transcript_fixup, speaker_fixup, select, finalize]
+           merge, transcript_fixup, speaker_fixup, select, highlights, finalize]
 
 segment:
   whisper: large-v3-turbo          # faster-whisper model name
@@ -125,6 +125,12 @@ select:
   max_per_speaker: 64              # a speaker with more keeps a random subset
   max_minutes_per_speaker: null    # optional cap on a speaker's audio, in minutes
   seed: 0
+
+# A small second dataset in runs/<run>/highlights/: the most expressive, most aroused and most unusual voices.
+highlights:
+  per_list: 50                     # clips per list
+  per_speaker: 2                   # most clips one speaker may have in a list
+  workers: 1                       # scoring loops per GPU, 7 GB of GPU memory each; a second one adds no speed
 
 finalize:
   move: true                       # move the selected clips out of clips/ instead of copying them

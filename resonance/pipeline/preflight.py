@@ -19,6 +19,7 @@ MODULES = {
     "speaker_drift": ("speechbrain",),
     "transcript_fixup": ("faster_whisper", "verbalis"),
     "speaker_fixup": ("pyannote.audio", "scipy", "librosa"),
+    "highlights": ("transformers", "librosa"),
     "higgs": ("transformers", "accelerate"),
 }
 
