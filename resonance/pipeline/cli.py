@@ -29,11 +29,16 @@ def parser(doc: str) -> argparse.ArgumentParser:
     return result
 
 
-def load(args: argparse.Namespace) -> Config:
+def load(args: argparse.Namespace, require_run: bool = True) -> Config:
     try:
-        return loader.load(args.config, args.overrides)
+        config = loader.load(args.config, args.overrides)
     except loader.ConfigError as error:
         sys.exit(style.error(str(error)))
+    if require_run and not (config.run.name and config.source.language and config.source.batches):
+        sys.exit(style.error(f"{args.config} names no run. Add one, e.g. --set run.name=en004_100 "
+                             "--set source.language=en --set \"source.batches=[{shard: '004', first: 50, last: 99}]\", "
+                             "or process a whole language with scripts/run_language.py"))
+    return config
 
 
 def report_preflight(config: Config, console: Console, online: bool = True) -> bool:
@@ -147,7 +152,7 @@ def main_preflight(doc: str) -> None:
     args.add_argument("--download-models", action="store_true",
                       help="after the checks, load every model once so it is cached before the first run")
     args = args.parse_args()
-    config, console = load(args), Console()
+    config, console = load(args, require_run=False), Console()
     ready = report_preflight(config, console, not args.offline)
     if ready and args.download_models:
         console.say(style.section("Models"))

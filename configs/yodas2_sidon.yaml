@@ -1,13 +1,9 @@
 # The YODAS2-Sidon pipeline.
 
+# The run's name and batches (run.name, source.language, source.batches) are not set here: scripts/run_language.py
+# sets them for every chunk. For one run by hand, add them with --set (see scripts/run_pipeline.py).
 run:
-  name: en001_91
   data_root: data/yodas2_sidon     # raw/, clips/, batches/ and runs/<name>/ live under it
-
-source:
-  language: en
-  batches:                         # any number of ranges; shard ids are strings, so keep the quotes
-    - {shard: "001", first: 91, last: 91}
 
 resources:
   gpus: all                        # or a list of indices, e.g. [0, 1]
@@ -36,7 +32,7 @@ segment:
   margin: 2.0                      # seconds read beyond the first and last caption
   target_duration: 8.0             # an utterance closes at the first clean boundary past this
   min_duration: 3.0
-  max_duration: 25.0
+  max_duration: 30.0
   max_pause: 2.0                   # a longer pause inside an utterance ends it
   min_gap: 0.15                    # a cut needs at least this much silence
   lead: 0.1                        # silence kept before the speech; OmniVoice's prompt keeps 100 ms
@@ -49,7 +45,7 @@ quality:
   max_duration: 30.0
   # The cascade, cheapest first; a clip stops at the first metric it fails. Remove a name to switch a metric off.
   metrics: [bandwidth, clipping, hum, flatness, multi_speaker, nisqa, ctc]
-  workers: 6                       # processes per GPU, each holding every model; the GPU saturates by 6, and at
+  workers: 5                       # processes per GPU, each holding every model; the GPU saturates by 6, and at
                                    # 10 a 24 GB card runs out of memory
   max_error_rate: 0.01             # the stage stops when more than this share of its clips raise an error
   # Fraction of Nyquist still carrying speech.
@@ -121,7 +117,7 @@ speaker_fixup:
   clips_per_speaker: 4             # clips embedded per video; every pair of them is compared
 
 select:
-  min_per_speaker: 4               # speakers with fewer clips are left out
+  min_per_speaker: 2               # speakers with fewer clips are left out
   max_per_speaker: 64              # a speaker with more keeps a random subset
   max_minutes_per_speaker: null    # optional cap on a speaker's audio, in minutes
   seed: 0
@@ -137,3 +133,19 @@ finalize:
   zip: true                        # pack audio/ into audio.zip and remove audio/
   compression: deflate             # deflate (lossless) or stored
   codecs: []                       # e.g. [higgs] also writes codecs/higgs/<name>.npy; needs `pip install .[higgs]`
+
+orchestrate:                       # scripts/run_language.py only; run_pipeline.py ignores it
+  chunk_batches: 50                # one pipeline run per 50 batches of a shard, named <lang><shard>_<last + 1>
+  shards: []                       # e.g. ["004", "005"]; empty takes every shard of the language
+  poll_seconds: 60
+  stall_minutes: 30                # run.log silent this long while the pipeline lives counts as a hang
+  max_failures: 3                  # a batch failing this often is quarantined; a pool stage stops everything
+  min_free_gb: 160                 # a chunk starts only with this much free disk
+  upload:
+    remote: gdrive-yodas           # rclone remote with write access to the Drive
+    root_folder_id: 1C0nDclN_APyngv87XV7x7Uy49IlnUI-G
+    path: train/{language_name}/yodas2_sidon/{run}
+    highlights: true
+    transfers: 4
+    retries: 3
+    stats_seconds: 30              # interval of the upload progress lines

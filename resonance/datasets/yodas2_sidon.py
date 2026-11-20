@@ -7,6 +7,7 @@ video beside its <n>.metadata.json.
 """
 
 import json
+import re
 import subprocess
 import tarfile
 from pathlib import Path
@@ -21,6 +22,15 @@ BASE_URL = f"https://huggingface.co/datasets/{REPO}/resolve/main"
 TREE_URL = f"https://huggingface.co/api/datasets/{REPO}/tree/main"
 ARIA2 = ("--continue=true", "--auto-file-renaming=false", "--max-connection-per-server=8",
          "--split=8", "--max-tries=10", "--retry-wait=30", "--console-log-level=warn", "--summary-interval=0")
+
+
+def shards(language: str) -> list[str]:
+    """The language's shard names in order (en000, en001, ..., en100, ...)."""
+
+    response = requests.get(TREE_URL, params={"limit": 1000}, timeout=30)
+    response.raise_for_status()
+    return sorted(entry["path"] for entry in response.json()
+                  if entry["type"] == "directory" and re.fullmatch(rf"{language}\d{{3}}", entry["path"]))
 
 
 def available(shard: str) -> list[str]:

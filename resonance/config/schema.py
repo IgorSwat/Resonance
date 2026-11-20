@@ -10,7 +10,7 @@ from pathlib import Path
 
 @dataclass
 class RunConfig:
-    name: str
+    name: str = ""                         # set per chunk by scripts/run_language.py, or with --set for one run
     data_root: Path = Path("data/yodas2_sidon")
 
 
@@ -23,8 +23,8 @@ class BatchRange:
 
 @dataclass
 class SourceConfig:
-    language: str
-    batches: list[BatchRange]
+    language: str = ""
+    batches: list[BatchRange] = field(default_factory=list)
 
 
 @dataclass
@@ -51,7 +51,7 @@ class SegmentConfig:
     margin: float = 2.0
     target_duration: float = 8.0
     min_duration: float = 3.0
-    max_duration: float = 25.0
+    max_duration: float = 30.0
     max_pause: float = 2.0
     min_gap: float = 0.15
     lead: float = 0.1
@@ -116,7 +116,7 @@ class QualityConfig:
     multi_speaker: MultiSpeakerConfig = field(default_factory=MultiSpeakerConfig)
     nisqa: NisqaConfig = field(default_factory=NisqaConfig)
     ctc: CtcConfig = field(default_factory=CtcConfig)
-    workers: int = 6
+    workers: int = 5
     max_error_rate: float = 0.01
 
 
@@ -153,7 +153,7 @@ class SpeakerFixupConfig:
 
 @dataclass
 class SelectConfig:
-    min_per_speaker: int = 4
+    min_per_speaker: int = 2
     max_per_speaker: int = 64
     max_minutes_per_speaker: float | None = None
     seed: int = 0
@@ -175,9 +175,31 @@ class FinalizeConfig:
 
 
 @dataclass
+class UploadConfig:
+    remote: str = ""                       # rclone remote name; empty uploads to a local path (tests)
+    root_folder_id: str = ""               # Drive folder the path is relative to
+    path: str = "train/{language_name}/yodas2_sidon/{run}"
+    highlights: bool = True
+    transfers: int = 4
+    retries: int = 3
+    stats_seconds: int = 30                # interval of the upload progress lines
+
+
+@dataclass
+class OrchestrateConfig:
+    chunk_batches: int = 50                # chunks are aligned to multiples of this within a shard
+    shards: list[str] = field(default_factory=list)     # e.g. ["004", "005"]; empty takes every shard
+    poll_seconds: float = 60.0
+    stall_minutes: float = 30.0            # run.log silent this long while the pipeline lives: it hangs
+    max_failures: int = 3                  # a batch failing this often is quarantined; a pool stage stops everything
+    min_free_gb: float = 160.0             # a chunk starts only with this much free disk
+    upload: UploadConfig = field(default_factory=UploadConfig)
+
+
+@dataclass
 class Config:
-    run: RunConfig
-    source: SourceConfig
+    run: RunConfig = field(default_factory=RunConfig)
+    source: SourceConfig = field(default_factory=SourceConfig)
     resources: ResourcesConfig = field(default_factory=ResourcesConfig)
     disk: DiskConfig = field(default_factory=DiskConfig)
     pipeline: list[str] = field(default_factory=lambda: [
@@ -192,3 +214,4 @@ class Config:
     select: SelectConfig = field(default_factory=SelectConfig)
     highlights: HighlightsConfig = field(default_factory=HighlightsConfig)
     finalize: FinalizeConfig = field(default_factory=FinalizeConfig)
+    orchestrate: OrchestrateConfig = field(default_factory=OrchestrateConfig)
