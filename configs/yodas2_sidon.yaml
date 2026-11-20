@@ -140,7 +140,8 @@ orchestrate:                       # scripts/run_language.py only; run_pipeline.
   poll_seconds: 60
   stall_minutes: 30                # run.log silent this long while the pipeline lives counts as a hang
   max_failures: 3                  # a batch failing this often is quarantined; a pool stage stops everything
-  min_free_gb: 160                 # a chunk starts only with this much free disk
+  min_free_gb: 130                 # a chunk's GPU part starts only with this much free disk; below it, the chunk
+                                   # in the background (finalize, upload) is waited for first
   upload:
     remote: gdrive-yodas           # rclone remote with write access to the Drive
     root_folder_id: 1C0nDclN_APyngv87XV7x7Uy49IlnUI-G
@@ -149,3 +150,4 @@ orchestrate:                       # scripts/run_language.py only; run_pipeline.
     transfers: 4
     retries: 3
     stats_seconds: 30              # interval of the upload progress lines
+    quota_wait_minutes: 60         # wait before retrying once Drive's daily upload limit (~750 GB) is reached

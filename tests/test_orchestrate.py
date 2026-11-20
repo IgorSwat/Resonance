@@ -87,9 +87,12 @@ def test_upload_checks_and_lists(tmp_path: Path) -> None:
 CHILD = """
 import json, sys, time
 from pathlib import Path
-run_dir, mode = Path(sys.argv[1]), sys.argv[2]
+run_dir, mode, until, timeline = Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path(sys.argv[4])
 run_dir.mkdir(parents=True, exist_ok=True)
 (run_dir / "run.log").write_text("started\\n")
+phase = until or "finalize"
+with open(timeline, "a") as handle:
+    handle.write(f"{run_dir.name} {phase} start {time.time()}\\n")
 if mode == "hang":
     time.sleep(600)
 if mode == "fail":
@@ -97,33 +100,50 @@ if mode == "fail":
         handle.write(json.dumps({"kind": "stage_start", "batch": "en004/train-00101", "stage": "segment"}) + "\\n")
         handle.write(json.dumps({"kind": "batch_failed", "batch": "en004/train-00101"}) + "\\n")
     sys.exit(1)
-(run_dir / "dataset").mkdir(exist_ok=True)
-(run_dir / "dataset" / "audio.zip").write_bytes(b"zip" * 100)
-(run_dir / "dataset" / "en004_132.csv").write_text("name|transcription\\n")
-(run_dir / "highlights").mkdir(exist_ok=True)
-(run_dir / "highlights" / "scores.csv").write_text("x\\n")
-(run_dir / "finalize.done").write_text(json.dumps({"clips_out": 10, "hours_out": 1.5, "audio_gb": 0.1}))
+if until:
+    (run_dir / f"{until}.done").write_text("{}")
+else:
+    time.sleep(1.5)
+    (run_dir / "dataset").mkdir(exist_ok=True)
+    (run_dir / "dataset" / "audio.zip").write_bytes(b"zip" * 100)
+    (run_dir / "dataset" / f"{run_dir.name}.csv").write_text("name|transcription\\n")
+    (run_dir / "highlights").mkdir(exist_ok=True)
+    (run_dir / "highlights" / "scores.csv").write_text("x\\n")
+    (run_dir / "finalize.done").write_text(json.dumps({"clips_out": 10, "hours_out": 1.5, "audio_gb": 0.1}))
+with open(timeline, "a") as handle:
+    handle.write(f"{run_dir.name} {phase} end {time.time()}\\n")
 """
 
 
-def orchestrator(tmp_path: Path, behaviour, **settings: object) -> supervisor.Orchestrator:
-    """An orchestrator over a fake corpus whose pipeline is CHILD, run in the mode `behaviour(chunk)` picks."""
+def orchestrator(tmp_path: Path, behaviour, start: BatchRef = BatchRef("en", "004", 100),
+                 **settings: object) -> supervisor.Orchestrator:
+    """An orchestrator over a fake corpus whose pipeline is CHILD, run in the mode `behaviour(chunk, until)` picks."""
 
     config = tmp_path / "c.yaml"
-    upload = {"path": f"{tmp_path / 'drive'}/train/{{language_name}}/yodas2_sidon/{{run}}", "stats_seconds": 1}
+    upload = {"path": f"{tmp_path / 'drive'}/train/{{language_name}}/yodas2_sidon/{{run}}", "stats_seconds": 1,
+              "quota_wait_minutes": 0.001}
     config.write_text(yaml.safe_dump({
-        "run": {"name": "base", "data_root": str(tmp_path / "data")},
-        "source": {"language": "en", "batches": [{"shard": "004", "first": 0, "last": 0}]},
+        "run": {"data_root": str(tmp_path / "data")},
         "orchestrate": {"poll_seconds": 0.1, "stall_minutes": 0.05, "min_free_gb": 0, "upload": upload, **settings}}))
     script = tmp_path / "child.py"
     script.write_text(CHILD)
     clips = tmp_path / "data/clips/en004/train-00100"
     clips.mkdir(parents=True)
 
-    def command(chunk: Chunk, preflight: bool) -> list[str]:
-        return [sys.executable, str(script), str(tmp_path / "data/runs" / chunk.name), behaviour(chunk)]
+    def command(chunk: Chunk, preflight: bool, until: str | None) -> list[str]:
+        return [sys.executable, str(script), str(tmp_path / "data/runs" / chunk.name), behaviour(chunk, until),
+                until or "", str(tmp_path / "timeline.txt")]
 
-    return supervisor.Orchestrator(config, [], "en", BatchRef("en", "004", 100), command=command)
+    return supervisor.Orchestrator(config, [], "en", start, command=command)
+
+
+def timeline(tmp_path: Path) -> dict[tuple[str, str, str], float]:
+    lines = (tmp_path / "timeline.txt").read_text().split("\n")
+    return {tuple(line.split()[:3]): float(line.split()[3]) for line in lines if line}
+
+
+def ledger(tmp_path: Path) -> dict:
+    return json.loads((tmp_path / "data/orchestrator/en.json").read_text())["chunks"]
 
 
 @pytest.fixture
@@ -133,9 +153,9 @@ def fast(monkeypatch: pytest.MonkeyPatch, corpus: None) -> None:
 
 @needs_rclone
 def test_a_failing_batch_is_quarantined_and_the_chunk_delivered(tmp_path: Path, fast: None) -> None:
-    runner = orchestrator(tmp_path, lambda chunk: "ok" if 101 in chunk.skipped else "fail")
+    runner = orchestrator(tmp_path, lambda chunk, until: "ok" if 101 in chunk.skipped or not until else "fail")
     runner.run()
-    entry = json.loads((tmp_path / "data/orchestrator/en.json").read_text())["chunks"]["en004_132"]
+    entry = ledger(tmp_path)["en004_132"]
     assert entry["state"] == "done" and entry["skipped"] == [101] and entry["restarts"] == 3
     assert entry["failures"] == {"en004/train-00101": 3} and entry["hours"] == 1.5
     remote = tmp_path / "drive/train/english/yodas2_sidon/en004_132"
@@ -147,22 +167,53 @@ def test_a_failing_batch_is_quarantined_and_the_chunk_delivered(tmp_path: Path, 
 
 
 @needs_rclone
-def test_a_hang_is_killed_and_restarted(tmp_path: Path, fast: None) -> None:
-    attempts: list[str] = []
+def test_the_next_chunk_runs_while_the_previous_one_packs(tmp_path: Path, fast: None) -> None:
+    orchestrator(tmp_path, lambda chunk, until: "ok", start=BatchRef("en", "004", 50)).run()
+    times = timeline(tmp_path)
+    assert times[("en004_132", "highlights", "start")] < times[("en004_100", "finalize", "end")]
+    assert times[("en004_100", "finalize", "start")] > times[("en004_100", "highlights", "end")]
+    assert all(entry["state"] == "done" for entry in ledger(tmp_path).values())
 
-    def behaviour(chunk: Chunk) -> str:
-        attempts.append("hang" if not attempts else "ok")
-        return attempts[-1]
+
+@needs_rclone
+def test_a_hang_is_killed_and_restarted(tmp_path: Path, fast: None) -> None:
+    calls: list[str] = []
+
+    def behaviour(chunk: Chunk, until: str | None) -> str:
+        calls.append("hang" if not calls else "ok")
+        return calls[-1]
 
     started = time.time()
     orchestrator(tmp_path, behaviour).run()
-    assert attempts == ["hang", "ok"] and time.time() - started < 60
-    entry = json.loads((tmp_path / "data/orchestrator/en.json").read_text())["chunks"]["en004_132"]
+    assert calls == ["hang", "ok", "ok"] and time.time() - started < 60
+    entry = ledger(tmp_path)["en004_132"]
     assert entry["state"] == "done" and entry["other_failures"] == 1
 
 
+@needs_rclone
+def test_the_upload_waits_out_the_daily_limit(tmp_path: Path, fast: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    real, calls = drive.upload, []
+
+    def limited(*args: object) -> None:
+        calls.append(1)
+        if len(calls) == 1:
+            raise drive.QuotaExceeded("googleapi: Error 403: User rate limit exceeded., userRateLimitExceeded")
+        real(*args)
+
+    monkeypatch.setattr(supervisor.drive, "upload", limited)
+    runner = orchestrator(tmp_path, lambda chunk, until: "ok")
+    runner.run()
+    assert len(calls) == 2 and ledger(tmp_path)["en004_132"]["state"] == "done"
+    assert "daily upload limit" in (tmp_path / "data/orchestrator/en.log").read_text()
+
+
+def test_quota_errors_are_told_apart() -> None:
+    assert isinstance(drive.failure("Error 403: User rate limit exceeded., userRateLimitExceeded"), drive.QuotaExceeded)
+    assert type(drive.failure("Error 403: The user's Drive storage quota has been exceeded")) is drive.UploadError
+
+
 def test_repeated_failures_without_a_batch_stop(tmp_path: Path, fast: None) -> None:
-    runner = orchestrator(tmp_path, lambda chunk: "crash")
+    runner = orchestrator(tmp_path, lambda chunk, until: "crash")
     script = tmp_path / "child.py"
     script.write_text("import sys; sys.exit(3)")
     with pytest.raises(supervisor.Stop, match="ended \\(3\\) 3 times"):
