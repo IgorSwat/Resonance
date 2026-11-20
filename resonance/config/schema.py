@@ -183,6 +183,7 @@ class UploadConfig:
     transfers: int = 4
     retries: int = 3
     stats_seconds: int = 30                # interval of the upload progress lines
+    quota_wait_minutes: float = 60.0       # wait before retrying once Drive's daily upload limit is reached
 
 
 @dataclass
@@ -192,7 +193,7 @@ class OrchestrateConfig:
     poll_seconds: float = 60.0
     stall_minutes: float = 30.0            # run.log silent this long while the pipeline lives: it hangs
     max_failures: int = 3                  # a batch failing this often is quarantined; a pool stage stops everything
-    min_free_gb: float = 160.0             # a chunk starts only with this much free disk
+    min_free_gb: float = 130.0             # a chunk's GPU part starts only with this much free disk
     upload: UploadConfig = field(default_factory=UploadConfig)
 
 

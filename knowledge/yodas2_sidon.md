@@ -487,9 +487,26 @@ batch stages alone sustain about 14 batches/h there (run `en004_100`, 2026-11-20
   stays silent for `stall_minutes`. The child and all its descendants are killed first, including the ones in
   their own process groups (§16). A batch that fails `max_failures` times is left out of its chunk; a pool stage
   that does, or an upload, stops the orchestrator with everything kept on disk.
-- **Each finished chunk uploads in the background** (`rclone copy`, progress lines every `stats_seconds`, then
-  `rclone check` on md5) while the next chunk runs; only then are its dataset, highlights and leftover clips
-  deleted. A chunk starts only with `min_free_gb` free.
+- **A chunk runs in two parts that overlap with the next chunk.** The pipeline runs `--until` the stage before
+  finalize (highlights): everything that uses the GPUs. Finalize, which only zips on the CPU (34.5 min on
+  `en004_100`, 39.1 GiB), then runs in the background with the upload (`rclone copy`, progress lines every
+  `stats_seconds`, then `rclone check` on md5) and the cleanup, while the next chunk's GPU part already runs. At
+  most one chunk is in the background. With `finalize.codecs` set, finalize uses the GPUs and runs in line instead.
+  Measured on `en004_100` (2×4090), the stages after the batch stages took 62 min of a 4 h 33 min chunk, so the
+  overlap is worth about a fifth of the chunk time there, and more on boxes with more GPUs.
+- **Drive's daily upload limit (about 750 GB per account) pauses the upload, not the orchestrator.** rclone runs
+  with `--drive-stop-on-upload-limit`; an error naming `userRateLimitExceeded` waits `quota_wait_minutes` and
+  retries, uncounted. The next chunk's GPU part still runs, then waits for that upload: over a day the throughput
+  cannot exceed the limit anyway, so buffering more chunks would only fill the disk. A full Drive is an ordinary
+  error and stops after `retries`.
+- **Disk.** A chunk's GPU part starts only with `min_free_gb` free (130 by default); below it, the chunk in the
+  background is waited for. Estimated peak on a 50-batch chunk: ~75 GB of clips of the chunk being packed, ~42 GB
+  of its zip, the next chunk's clips growing (~35 GB while finalize runs), ~9 GB downloaded ahead and the models,
+  about 190-230 GB in all. A 256 GB disk works but leaves the guard little room; 512 GB keeps the overlap going
+  while an upload waits out the daily limit (not measured yet).
+- **No parallel zip.** Zip members are deflated one by one, so parallel compression at the same level would give
+  the same size, but Python's `zipfile` cannot write members compressed elsewhere, and with the overlap the zip no
+  longer holds up the GPUs. `compression: stored` is faster but 19% bigger (§16), which costs Drive's limit.
 - **`configs/yodas2_sidon.yaml` names no run any more:** `run.name` and `source` are set per chunk, and a run by
   hand passes them with `--set`. Its defaults became the settings the 2×4090 box ran with on 2026-11-20:
   `segment.max_duration` 30 s (was 25), `quality.workers` 5 (was 6), `select.min_per_speaker` 2 (was 4).

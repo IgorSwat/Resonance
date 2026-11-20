@@ -48,6 +48,19 @@ class UploadError(RuntimeError):
     pass
 
 
+class QuotaExceeded(UploadError):
+    """Drive's undocumented daily upload limit (about 750 GB per account) is reached; it frees up within a day."""
+
+
+QUOTA_MARKS = ("userratelimitexceeded", "user rate limit exceeded", "upload limit")
+
+
+def failure(message: str) -> UploadError:
+    """The error for a failed rclone call: QuotaExceeded when its output names the daily upload limit."""
+
+    return QuotaExceeded(message) if any(mark in message.lower() for mark in QUOTA_MARKS) else UploadError(message)
+
+
 def target(config: UploadConfig, language: str, run: str) -> str:
     """The rclone destination of a run, e.g. gdrive:train/english/yodas2_sidon/en004_100."""
 
@@ -61,6 +74,8 @@ def _rclone(config: UploadConfig, *args: str) -> list[str]:
     command = ["rclone", *args]
     if config.remote and config.root_folder_id:
         command += ["--drive-root-folder-id", config.root_folder_id]
+    if config.remote:
+        command.append("--drive-stop-on-upload-limit")      # fail at the daily limit instead of retrying for hours
     return command
 
 
@@ -96,7 +111,7 @@ def upload(config: UploadConfig, language: str, run: str, dataset: Path, highlig
         check = subprocess.run(_rclone(config, "check", "--one-way", str(source), remote),
                                capture_output=True, text=True)
         if check.returncode:
-            raise UploadError(f"rclone check {source} → {remote} found differences: {check.stderr.strip()[-800:]}")
+            raise failure(f"rclone check {source} → {remote} found differences: {check.stderr.strip()[-800:]}")
         log(f"upload {run}: {source.name}/ verified (hashes match)")
 
 
@@ -117,10 +132,10 @@ def _copy(config: UploadConfig, source: Path, remote: str, run: str, log: Callab
             line_text = progress_line(entry["stats"])
             if line_text:
                 log(f"upload {run}: {line_text}")
-        elif entry.get("level") == "error":
+        elif entry.get("level") in ("error", "critical"):
             errors.append(entry.get("msg", ""))
     if process.wait():
-        raise UploadError(f"rclone copy {source} → {remote} failed: {' | '.join(errors)[-800:]}")
+        raise failure(f"rclone copy {source} → {remote} failed: {' | '.join(errors)[-800:]}")
 
 
 def progress_line(stats: dict) -> str:
