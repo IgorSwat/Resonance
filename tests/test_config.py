@@ -31,7 +31,7 @@ def test_roundtrip(tmp_path: Path) -> None:
 @pytest.mark.parametrize("text, message", [
     (BASE + "quality: {worker: 3}\n", "Unknown key(s) quality.worker"),
     (BASE + "segment: {batch_size: big}\n", "segment.batch_size"),
-    ("run: {name: t}\n", "Missing required key(s) source"),
+    (BASE + "run: {name: t, extra: 1}\n", "Unknown key(s) run.extra"),
     (BASE.replace("'001'", "1"), "source.batches[0].shard"),
     (BASE + "finalize: {zip: 1}\n", "finalize.zip"),
 ])

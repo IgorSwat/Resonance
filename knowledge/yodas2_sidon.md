@@ -471,3 +471,34 @@ because `speaker_fixup` rests on it.
 - **Run it over many batches.** Ten random recordings rarely share a host (§11); four batches merged 36 of 509
   video IDs (§16).
 
+
+## 18. Unattended runs over a whole language (added 2026-11-20, not run on a box yet)
+
+`scripts/run_language.py` (`resonance/orchestrate/`) replaces starting each 50-batch run by hand and copying its
+output to Google Drive. Built because hand-run batches reached about 1,000 h/day on the 2×4090 box, while the
+batch stages alone sustain about 14 batches/h there (run `en004_100`, 2026-11-20), about 2,400 h/day.
+
+- **One orchestrator per language.** It cuts every shard into chunks aligned to `orchestrate.chunk_batches` and
+  names them like the Drive folders made by hand: `<lang><shard>_<last + 1>` (`en000_50`, `en000_100`,
+  `en000_132`). `--start en004/100` skips everything before a batch; chunks whose `audio.zip` and `<run>.csv` are
+  already in `train/<language>/yodas2_sidon/<run>/` on Drive are skipped too. A dry run on 2026-11-20 found the 11
+  English chunks uploaded by hand and only `en003_131` missing among the finished shards.
+- **The pipeline runs as a child process**, restarted after 1, 5, then 15 min when it exits non-zero or `run.log`
+  stays silent for `stall_minutes`. The child and all its descendants are killed first, including the ones in
+  their own process groups (§16). A batch that fails `max_failures` times is left out of its chunk; a pool stage
+  that does, or an upload, stops the orchestrator with everything kept on disk.
+- **Each finished chunk uploads in the background** (`rclone copy`, progress lines every `stats_seconds`, then
+  `rclone check` on md5) while the next chunk runs; only then are its dataset, highlights and leftover clips
+  deleted. A chunk starts only with `min_free_gb` free.
+- **`configs/yodas2_sidon.yaml` names no run any more:** `run.name` and `source` are set per chunk, and a run by
+  hand passes them with `--set`. Its defaults became the settings the 2×4090 box ran with on 2026-11-20:
+  `segment.max_duration` 30 s (was 25), `quality.workers` 5 (was 6), `select.min_per_speaker` 2 (was 4).
+- State is in `<data_root>/orchestrator/<language>.json`, the log in `<language>.log`, each chunk's pipeline output
+  in `<run>.out`; `--status` prints the ledger.
+
+## ⚑ Gotchas
+
+- **Drive needs a remote with write access.** The `gdrive` remote set up for downloads
+  (`Echo/knowledge/downloading_the_data.md`) is read-only; uploads use `orchestrate.upload.remote` (default
+  `gdrive-yodas`), configured on the box with the full `drive` scope. rclone warns that its shared `client_id` is
+  retired during 2026.

@@ -1,8 +1,10 @@
 """
-Run a whole pipeline, unattended: fetch, segment, filter, fix speakers, select and pack.
+Run one pipeline run: fetch, segment, filter, fix speakers, select and pack. scripts/run_language.py runs these
+for a whole language; this runs one by hand, naming its batches with --set (or in a copy of the config).
 
-    python scripts/run_pipeline.py --config configs/yodas2_sidon.yaml
-    python scripts/run_pipeline.py --config configs/yodas2_sidon.yaml --dry-run
+    RUN=(--set run.name=en004_100 --set source.language=en --set "source.batches=[{shard: '004', first: 50, last: 99}]")
+    python scripts/run_pipeline.py --config configs/yodas2_sidon.yaml "${RUN[@]}"
+    python scripts/run_pipeline.py --config configs/yodas2_sidon.yaml "${RUN[@]}" --dry-run
     python scripts/run_pipeline.py --config my.yaml --set resources.gpus=[0] --until speaker_drift
     python scripts/run_pipeline.py --config my.yaml --from select
 
